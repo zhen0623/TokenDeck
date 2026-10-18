@@ -1,0 +1,661 @@
+@import 'tailwindcss';
+
+/* ============================================================================
+   LightBase — 设计 token（提取自 Chunyu33/light-c）
+   核心：微信绿单一强调色 + em 驱动全站尺寸 + 亮/暗 × 普通/玻璃 四态
+   ========================================================================== */
+
+:root {
+  --brand-green: #07c160;
+  --brand-green-hover: #06ad56;
+  --brand-green-10: rgba(7, 193, 96, 0.1);
+  --brand-green-20: rgba(7, 193, 96, 0.2);
+  --brand-green-text: #067a3e;
+
+  --bg-main: #f5f5f5;
+  --bg-card: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #fafafa;
+  --bg-active: #f0f0f0;
+  --bg-input: #ffffff;
+  --bg-switch: #d1d5db;
+  --bg-track: #e6e6e6;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #3d3d3d;
+  --text-muted: #6b6b6b;
+  --text-faint: #6e6e73;
+
+  --border-color: #ededed;
+  --border-muted: #f5f5f5;
+
+  --color-success: #07c160;
+  --color-warning: #fa9d3b;
+  --color-danger: #fa5151;
+
+  /* ----------------------------------------------------------------
+   * 间距刻度（8pt 网格）
+   * 之前全站散落 50+ 种 padding/gap（0.12em ~ 1.15em），
+   * 侧栏 0.7em、卡片 1.05em、栅格 0.8em 互不成倍数，视觉必然散。
+   * 现在只允许 6 档：4 / 8 / 12 / 16 / 20 / 24 px（按 15px 基准算 em）。
+   * ---------------------------------------------------------------- */
+  --sp-1: 0.25em;   /*  4px */
+  --sp-2: 0.5em;    /*  8px */
+  --sp-3: 0.75em;   /* 12px */
+  --sp-4: 1em;      /* 16px */
+  --sp-5: 1.25em;   /* 20px */
+  --sp-6: 1.5em;    /* 24px */
+
+  /* 语义化别名：页面/卡片/栅格各用一档，全局一致 */
+  --pad-page: var(--sp-4);
+  --pad-card: var(--sp-4);
+  --gap-grid: var(--sp-3);
+  --gap-inline: var(--sp-2);
+
+  --font-size-offset: 0px;
+  --base-font-size: 14px;
+  --base-line-height: 1.5;
+
+  --radius-sm: 0.6em;
+  --radius-btn: 0.65em;
+  --radius-card: 0.8em;
+  --radius-lg: 1.1em;
+
+  /* ----------------------------------------------------------------
+   * 底部 dock 高度
+   * 手机端一级导航常驻底部。内容区必须让出这段高度，否则最后一屏
+   * 会被 dock 永久遮住 —— 这类问题在滚动到底才会暴露，容易漏测。
+   * 高度 = 图标行 + 间隙 + 文字 + 上下内边距 + 手势条安全区。
+   *
+   * 注意：这个值必须跟着 dock 的实际高度走。
+   * dock 改成「胶囊包住图标+文字」后，实测只有 46.2px，
+   * 若仍按旧的 5.4em（75.6px）预留，内容底部会空出约 29px 白条。
+   * 现值 = dock 高(61.8) + 离底(7) ≈ 68.8px（4.92em @ 14px）。
+   * 注意：dock 的 py 或高度一变，这里必须同步，否则底部会空出一截白条，
+   * 或反过来让最后一屏被遮住。改 dock 尺寸时把这两个数字一起核。
+   * ---------------------------------------------------------------- */
+  --dock-h: calc(4.92em + env(safe-area-inset-bottom, 0px));
+
+  --shadow-soft: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --shadow-float: 0 8px 24px rgba(15, 23, 42, 0.12);
+
+  --glass-blur: none;
+  --glass-toolbar-bg: var(--bg-elevated);
+  --glass-surface-bg: var(--bg-card);
+  --glass-chrome-bg: var(--bg-elevated);
+  --glass-overlay-bg: var(--bg-elevated);
+  --glass-border: var(--border-color);
+  --glass-inner: none;
+  --glass-shadow: none;
+  --glass-edge: transparent;
+}
+
+html.dark {
+  --brand-green: #06ad56;
+  --brand-green-hover: #07c160;
+  --brand-green-10: rgba(6, 173, 86, 0.15);
+  --brand-green-20: rgba(6, 173, 86, 0.25);
+  --brand-green-text: #3ddc84;
+
+  --bg-main: #111111;
+  --bg-card: #191919;
+  --bg-elevated: #1f1f1f;
+  --bg-hover: #252525;
+  --bg-active: #2f2f2f;
+  --bg-input: #1f1f1f;
+  --bg-switch: #4b5563;
+  --bg-track: #333333;
+
+  --text-primary: #e8e8e8;
+  --text-secondary: #c2c2c2;
+  --text-muted: #a0a0a0;
+  --text-faint: #858585;
+
+  --border-color: #2c2c2c;
+  --border-muted: #222222;
+
+  --color-success: #06ad56;
+  --color-warning: #e08a30;
+  --color-danger: #e04545;
+
+  --shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------------- 玻璃态（可选材质） ---------------- */
+/* 关键：玻璃底下有强背景，卡片不透明度必须拉高，否则文字会糊进背景。 */
+html.glass:not(.dark) {
+  --glass-blur: blur(20px) saturate(180%);
+  --bg-main: transparent;
+  --bg-card: rgba(255, 255, 255, 0.86);
+  --bg-elevated: rgba(255, 255, 255, 0.9);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --glass-toolbar-bg: rgba(255, 255, 255, 0.86);
+  --glass-surface-bg: rgba(255, 255, 255, 0.78);
+  --glass-chrome-bg: rgba(255, 255, 255, 0.8);
+  --glass-overlay-bg: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(255, 255, 255, 0.9);
+  --border-color: rgba(15, 23, 42, 0.09);
+  --border-muted: rgba(15, 23, 42, 0.05);
+  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --glass-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+  --glass-edge: rgba(255, 255, 255, 0.9);
+  --bg-track: rgba(15, 23, 42, 0.12);
+}
+
+html.dark.glass {
+  --glass-blur: blur(20px) saturate(160%);
+  --bg-main: transparent;
+  --bg-card: rgba(28, 32, 40, 0.78);
+  --bg-elevated: rgba(34, 39, 48, 0.84);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-active: rgba(255, 255, 255, 0.14);
+  --glass-toolbar-bg: rgba(26, 30, 38, 0.84);
+  --glass-surface-bg: rgba(28, 32, 40, 0.78);
+  --glass-chrome-bg: rgba(26, 30, 38, 0.84);
+  --glass-overlay-bg: rgba(24, 33, 48, 0.96);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border-muted: rgba(255, 255, 255, 0.07);
+  --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --bg-track: rgba(255, 255, 255, 0.16);
+}
+
+/* ============================================================================
+   极光背景（仅玻璃态）—— 必须含高频细节，否则液态折射看不见
+   ---------------------------------------------------------------------------
+   物理事实：位移滤镜把背景采样点移动 ±18px。
+   若背景是平滑渐变，移动后像素值几乎不变 → 折射视觉为零。
+   所以这里三层叠加：
+     ① 结构性色斑（有明确边界，不是无限平滑）
+     ② 细颗粒噪点（每像素变化，位移后立刻显出"错位"）
+     ③ 极淡网格线（提供可辨识的直线基准，弯折最明显）
+   ========================================================================== */
+html.glass body::before {
+  content: '';
+  position: fixed;
+  inset: -15%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side at 16% 22%, rgba(7, 193, 96, 0.62), transparent 78%),
+    radial-gradient(closest-side at 82% 18%, rgba(56, 152, 255, 0.5), transparent 76%),
+    radial-gradient(closest-side at 68% 84%, rgba(150, 96, 255, 0.44), transparent 78%),
+    radial-gradient(closest-side at 30% 76%, rgba(250, 157, 59, 0.32), transparent 74%),
+    linear-gradient(155deg, #eaf6f0 0%, #edf1f9 48%, #f3eef9 100%);
+  filter: blur(14px) saturate(125%);
+}
+
+html.dark.glass body::before {
+  background:
+    radial-gradient(closest-side at 16% 22%, rgba(6, 173, 86, 0.5), transparent 78%),
+    radial-gradient(closest-side at 82% 18%, rgba(38, 92, 190, 0.52), transparent 76%),
+    radial-gradient(closest-side at 68% 84%, rgba(102, 62, 180, 0.46), transparent 78%),
+    radial-gradient(closest-side at 30% 76%, rgba(160, 88, 24, 0.3), transparent 74%),
+    linear-gradient(155deg, #080f11 0%, #0a1018 48%, #100d17 100%);
+  filter: blur(14px) saturate(130%);
+}
+
+/* ② 细颗粒噪点：折射的"显影剂" */
+html.glass body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+html.dark.glass body::after {
+  opacity: 0.38;
+  mix-blend-mode: soft-light;
+}
+
+html.glass .glass-chrome {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--glass-chrome-bg);
+  box-shadow: var(--glass-inner), var(--glass-shadow);
+}
+
+html.glass .glass-surface {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--glass-surface-bg);
+  box-shadow: var(--glass-inner), var(--glass-shadow);
+}
+
+/* ---------------- 基础 ---------------- */
+
+/*
+ * 全站尺寸由 em 驱动，所以「根字号」就是缩放总闸。
+ * 之前写死 14px，手机上 360px 宽的屏只有 14px 基准，卡片显得又小又挤。
+ * 现在按屏宽分档：小屏 15px、超窄屏 14px、大屏 15px、桌面 14px。
+ */
+html {
+  /*
+   * 锁死系统字体缩放对布局的影响。
+   * 安卓系统设置里的「字体大小」会额外放大 WebView 文字，
+   * 实测 130% 时卡片数字直接撑破容器。字号统一由 --font-size-offset 控制。
+   */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-size: calc(var(--base-font-size) + var(--font-size-offset));
+  line-height: var(--base-line-height);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 防止任何子元素把整页顶出横向滚动 */
+  overflow-x: hidden;
+}
+
+/* 手机：基准放大一档，正文 15px 更易读 */
+@media (max-width: 640px) {
+  html {
+    --base-font-size: 15px;
+  }
+}
+
+/* 超窄屏（≤360px，如老机型/分屏）：收回到 14px，避免卡片内文字换行错位 */
+@media (max-width: 360px) {
+  html {
+    --base-font-size: 14px;
+  }
+}
+
+/* 大屏：适度放大，避免 27 寸上字太小 */
+@media (min-width: 1600px) {
+  html {
+    --base-font-size: 15px;
+  }
+}
+
+body {
+  margin: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Noto Sans CJK SC',
+    sans-serif;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--brand-green-20);
+}
+
+/* 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+html.dark * {
+  scrollbar-color: #3f3f46 transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+}
+
+/* 焦点环统一 */
+:focus-visible {
+  outline: 2px solid var(--brand-green);
+  outline-offset: 2px;
+}
+
+/* ---------------- 动效 ---------------- */
+@keyframes lb-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes lb-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes lb-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes lb-pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--brand-green-20);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+.lb-enter {
+  animation: lb-content-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.lb-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--brand-green-10) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: lb-shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================================
+   液态玻璃 Liquid Glass
+   ---------------------------------------------------------------------------
+   与普通毛玻璃的区别全在这里：
+     1. 折射  ← 由 JS 生成位移图 + SVG feDisplacementMap（见 liquid-glass.tsx）
+     2. 镜面高光 ← 本文件的 ::before / ::after
+     3. 动态着色 ← --lb-tint + saturate(180%)
+
+   降级链路（data-glass-tier）：
+     3 = Chromium，折射全开
+     2 = Safari/Firefox，只有模糊+高光
+     1 = 极老环境，纯半透明
+   ========================================================================== */
+
+.lb-liquid {
+  /* 不要在这里写 position：本文件在 Tailwind 之后，unlayered 规则会覆盖
+     fixed / sticky / static 等工具类，曾导致移动端抽屉仍占 185px 流宽。
+     需要相对定位的元素请各自加 relative 类。 */
+  isolation: isolate;
+  /* 镜面高光（方案：直接写进元素自身背景，不用伪元素）
+     ------------------------------------------------------------------
+     曾经用 ::before/::after + z-index:-1 画高光，结果完全不显示。
+     原因：元素一旦有 backdrop-filter，就会形成独立的合成层，
+     负 z-index 的后代会被压到「被过滤的背景」之下，连带高光一起消失。
+     改用 background-image 叠加 —— 它属于元素自身背景，一定画在过滤结果之上。
+
+     ⚠️ 不要把顶边画成 near-white 硬线。
+     旧版顶部是 0.98 + `inset 0 2px 0 -1px 0.95`，等于两条纯白硬边，
+     而左右两侧没有任何亮线 —— 结果就是用户说的「上下边框特别白、
+     粗细不一样、没有晕染」。现在改成：四边同一强度的 1px rim +
+     向内扩散的柔光，顶部只比别处略亮一点点。 */
+  background-image:
+    /* 1) 顶部方向的宽幅柔光：没有硬边，只是从外部缓慢渗进来 */
+    radial-gradient(
+      140% 110% at 50% -45%,
+      rgba(255, 255, 255, 0.34) 0%,
+      rgba(255, 255, 255, 0.14) 42%,
+      rgba(255, 255, 255, 0.04) 66%,
+      transparent 82%
+    ),
+    /* 2) 左上极轻的方向感，避免整块死平 */
+    radial-gradient(
+      90% 70% at 12% 8%,
+      rgba(255, 255, 255, 0.12) 0%,
+      transparent 62%
+    );
+  background-color: var(--lb-tint);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  /* 四边统一的 rim light + 向内的柔和晕染（bloom）
+     ⚠️ 不要加 `inset 0 1px …` 这类单向阴影 —— 那会让上下比左右亮，
+     正是"边框粗细看起来不一样"的来源。只保留四面等距的内发光。 */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 0 20px -6px rgba(255, 255, 255, 0.55),
+    inset 0 0 44px -18px rgba(255, 255, 255, 0.3),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 10px 32px rgba(15, 23, 42, 0.09);
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+html.dark .lb-liquid {
+  background-image:
+    radial-gradient(
+      140% 110% at 50% -45%,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.07) 42%,
+      rgba(255, 255, 255, 0.02) 66%,
+      transparent 82%
+    ),
+    radial-gradient(
+      90% 70% at 12% 8%,
+      rgba(255, 255, 255, 0.06) 0%,
+      transparent 62%
+    );
+  background-color: var(--lb-tint-dark);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 0 22px -8px rgba(255, 255, 255, 0.24),
+    inset 0 0 46px -20px rgba(255, 255, 255, 0.16),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 14px 40px rgba(0, 0, 0, 0.48);
+}
+
+/* tier 2（无折射环境）：把 rim light 加强，弥补缺失的折射质感 */
+.lb-liquid[data-glass-tier='2'] {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 0 22px -6px rgba(255, 255, 255, 0.55),
+    inset 0 0 46px -18px rgba(255, 255, 255, 0.3),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 32px rgba(15, 23, 42, 0.08);
+}
+html.dark .lb-liquid[data-glass-tier='2'] {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.09),
+    inset 0 0 24px -8px rgba(255, 255, 255, 0.26),
+    inset 0 0 48px -20px rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* tier 1：完全没有 backdrop-filter，提高不透明度保证可读 */
+.lb-liquid[data-glass-tier='1'] {
+  background-color: rgba(255, 255, 255, 0.86);
+}
+html.dark .lb-liquid[data-glass-tier='1'] {
+  background-color: rgba(28, 32, 40, 0.9);
+}
+
+/* 液态玻璃卡片内的文字，用不透明色保证可读 */
+.lb-liquid {
+  color: var(--text-primary);
+}
+
+/* 性能保护：低性能设备 / 用户要求减少动态时，禁用折射层 */
+@media (prefers-reduced-motion: reduce) {
+  .lb-liquid {
+    transition: none;
+  }
+}
+
+/* ============================================================================
+   折射验证背景（?bg=pattern）
+   ---------------------------------------------------------------------------
+   液态玻璃的折射**只有在背后有高频细节时才看得见**。
+   平滑渐变被位移 ±18px 后视觉上毫无变化 —— 这不是效果失效，是物理学。
+   所以这里铺一张高对比棋盘 + 色块 + 细线，用来验证折射是否真的发生。
+   ========================================================================== */
+/* 图案必须盖在极光之上，否则极光（z-index:-1）会把图案整个遮住，
+   测出来全是"高频=1.93"，误以为折射失效。 */
+html[data-bg='pattern'] body::before {
+  display: none; /* 测试时关掉极光，避免遮挡 */
+}
+html[data-bg='pattern'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.55) 0 8px,
+      rgba(255, 255, 255, 0.9) 8px 16px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(7, 193, 96, 0.55) 0 26px,
+      rgba(250, 81, 81, 0.5) 26px 52px
+    );
+  background-blend-mode: multiply, normal;
+  opacity: 0.85;
+}
+
+
+/* ---------------- 骨架屏 ---------------- */
+/* 呼吸而非闪烁：闪烁像加载失败，呼吸才像"正在等数据" */
+@keyframes lb-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.lb-skeleton {
+  animation: lb-breathe 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-skeleton { animation: none; opacity: 0.7; }
+}
+
+/* ---------------- 底部 dock ---------------- */
+
+/* ---------------- 内容区滚动条 ----------------
+ *
+ * 这里踩了一个很难靠眼睛发现的坑，记录清楚：
+ *
+ * 全局样式里有 `::-webkit-scrollbar { width: 8px }`。
+ * 在桌面 Chrome 里滚动条是叠加式的、不占布局；但 Android WebView
+ * 一旦显式设置了滚动条宽度，就会切换成"占位式"滚动条 ——
+ * 内容盒因此比视口窄 8px。
+ *
+ * 于是：
+ *   内容卡片右边缘 = 视口宽 - 14(页边距) - 8(滚动条)
+ *   底部 dock 右边缘 = 视口宽 - 14          （fixed 按视口算）
+ * 两者恒定错开 8px，用户看到的就是"左右没对齐"。
+ *
+ * 顶栏原本也在 main 之外，同样错位；现已移入 main 内部，共享同一宽度。
+ * dock 是 fixed，无法共享，所以让滚动条在手机上完全不占宽度。
+ *
+ * 手机端隐藏滚动条是移动端惯例（拇指滚动，不需要指示条）；
+ * ≥768px 时 dock 不存在，顶栏与卡片同在 main 内、等量收缩，对齐不受影响，
+ * 因此桌面端保留细滚动条，不影响可用性。
+ */
+
+.lb-scroll {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* 旧 Edge */
+}
+.lb-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@media (min-width: 768px) {
+  .lb-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #d4d4d8 transparent;
+  }
+  html.dark .lb-scroll {
+    scrollbar-color: #3f3f46 transparent;
+  }
+  .lb-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .lb-scroll::-webkit-scrollbar-thumb {
+    background: #d4d4d8;
+    border-radius: 999px;
+  }
+  html.dark .lb-scroll::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+  }
+}
+
+/*
+ * 桌面隐藏、手机常驻。这里只做布局与安全区，颜色/材质仍走 .lb-liquid，
+ * 不要在组件里硬编码颜色。
+ */
+/*
+ * 这里不要再给 .lb-dock 加任何 padding 规则，原因有两条，都踩过：
+ *
+ * ① 安全区只能消费一次。
+ *    组件用 fixed + bottom-[max(0.5em, env(safe-area-inset-bottom))] 定位，
+ *    已经把整条 dock 抬到手势条之上。若内部再加一份 env 内边距，
+ *    安全区被算两次：真机面板高 53.8 CSS，本机 46.2，差值 7.6 就是这一条。
+ *
+ * ② 任何 padding-bottom 都会覆盖掉 Tailwind 的 py。
+ *    曾写 padding-bottom:0 想"取消"旧的内边距，结果 py-[0.45em] 的
+ *    下半部分被吃掉：上留白 11.48、下留白 5.19，肉眼就是内容下沉、上下歪。
+ *    竖向留白统一交给组件的 py-* 工具类，这里一个字都别写。
+ */
+
+/* dock 内的按钮不要被文本选择/长按菜单干扰 */
+.lb-dock button {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 点击反馈：移动端没有 hover，用 :active 给一点下压感 */
+.lb-dock button:active {
+  transform: scale(0.94);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-dock button:active { transform: none; }
+}

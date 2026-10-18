@@ -1,0 +1,22 @@
+# 依赖与构建产物，一律不入库
+**/node_modules/
+lightbase/dist/
+tokendeck-android/.gradle/
+tokendeck-android/build/
+tokendeck-android/app/build/
+
+# 本机路径配置（含绝对路径，换机器必须重写）
+tokendeck-android/local.properties
+
+# 便携工具链软链（指向 1.3G 的 JDK/SDK 目录，不在仓库内）
+tokendeck-android/tools
+
+# 本机专用调试脚本：里面写死了本机 puppeteer 与工作区的绝对路径，
+# 换台机器就跑不了，因此不进仓库（文件仍保留在本地）
+lightbase/*.mjs
+
+# 杂项
+.DS_Store
+*.log
+*.apk
+*.zip

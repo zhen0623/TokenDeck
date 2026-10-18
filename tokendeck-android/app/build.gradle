@@ -1,0 +1,58 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.darius.tokendeck'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.darius.tokendeck"
+        minSdk 24
+        targetSdk 34
+        versionCode 22
+        versionName "0.8.8"
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // 复用 debug 签名，侧载安装不需要管理密钥
+            signingConfig signingConfigs.debug
+            // 开启混淆与资源压缩，把 5.5M 压到 5M 以下，避免微信传输截断
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding false
+    }
+
+    packagingOptions {
+        resources.excludes += ['META-INF/*.kotlin_module']
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // WebViewAssetLoader：用 https://appassets... 提供本地资源，
+    // 比 file:// 更安全，且 localStorage / 同源策略行为与真实站点一致
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'com.google.android.material:material:1.11.0'
+}

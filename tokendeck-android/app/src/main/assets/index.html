@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>TokenDeck · 用量监控</title>
+    <link rel="icon" type="image/svg+xml" href="./logo.svg" />
+    <script>
+      // 首帧前定主题，避免闪白（支持 ?theme=dark&glass=1&fs=2 直接预览）
+      (function () {
+        try {
+          var q = new URLSearchParams(location.search);
+          if (q.has('theme')) localStorage.setItem('lb-theme', JSON.stringify(q.get('theme')));
+          if (q.has('glass')) {
+            var gv = q.get('glass');
+            localStorage.setItem(
+              'lb-glass-mode',
+              JSON.stringify(gv === 'liquid' ? 'liquid' : gv === '1' || gv === 'frosted' ? 'frosted' : 'off'),
+            );
+          }
+          if (q.has('fs')) localStorage.setItem('lb-fs', JSON.stringify(Number(q.get('fs'))));
+
+          var t = localStorage.getItem('lb-theme') || 'system';
+          try { t = JSON.parse(t); } catch (e) {}
+          var dark =
+            t === 'dark' ||
+            (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var el = document.documentElement;
+          el.classList.toggle('dark', dark);
+          var gm = localStorage.getItem('lb-glass-mode');
+          try { gm = JSON.parse(gm); } catch (e) { gm = null; }
+          if (!gm && localStorage.getItem('lb-glass') === 'true') gm = 'frosted';
+          if (gm && gm !== 'off') el.classList.add('glass');
+          if (gm === 'liquid') el.classList.add('liquid');
+          if (q.get('bg') === 'pattern') el.dataset.bg = 'pattern';
+          var fs = Number(localStorage.getItem('lb-fs') || 0);
+          el.style.setProperty('--font-size-offset', (Number.isFinite(fs) ? fs : 0) + 'px');
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-x9eplW2L.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-D83WYn5o.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
