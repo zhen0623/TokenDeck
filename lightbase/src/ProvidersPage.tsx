@@ -12,6 +12,7 @@ import {
   KeyRound,
   ChevronDown,
   Info,
+  ClipboardPaste,
 } from 'lucide-react';
 import { Button, Badge, cx } from './ui';
 import { Section, INPUT_CLS } from './settings-ui';
@@ -27,7 +28,7 @@ import {
   type ProviderGroup,
   type CustomProvider,
 } from './settings';
-import { httpRequest, hasNativeBridge, allowHostFor } from './native';
+import { httpRequest, hasNativeBridge, allowHostFor, readClipboardText } from './native';
 import { APP_VERSION } from './version';
 
 /* ============================================================ 厂商行 */
@@ -77,6 +78,27 @@ function ProviderRow({
       return setProbe({ kind: 'fail', message: `请求失败 HTTP ${res.status}` });
     }
 
+    /*
+     * 先判断响应到底是不是 JSON。
+     *
+     * 有些站点（如 cc-vibe.com）对所有未知路径都回退到首页：任意 /xxx
+     * 都返回 200 + 676KB HTML。若不先拦，"测试连接"会因为 HTTP 200
+     * 就报"Key 有效"，用户以为配通了，实际请求的是网页。
+     * 这类误判比报错更难查，所以宁可判失败并把原因说清楚。
+     */
+    const bodyTrim = res.body.trimStart();
+    const looksHtml =
+      bodyTrim.startsWith('<') ||
+      /^<!doctype html/i.test(bodyTrim) ||
+      /^<html/i.test(bodyTrim);
+    if (looksHtml) {
+      return setProbe({
+        kind: 'fail',
+        message:
+          '接口返回的是网页而不是 JSON。Base URL 可能填到了站点首页路径，请只填到 /v1 为止',
+      });
+    }
+
     if (kind === 'balance' && spec.balance) {
       try {
         const json = JSON.parse(res.body) as Record<string, unknown>;
@@ -101,7 +123,16 @@ function ProviderRow({
       const n = Array.isArray(arr) ? arr.length : undefined;
       return setProbe({ kind: 'ok', message: 'Key 有效', models: n });
     } catch {
-      return setProbe({ kind: 'ok', message: 'Key 有效' });
+      /*
+       * 走到这里说明 HTTP 成功、又不是 HTML，但正文不是合法 JSON。
+       * 旧逻辑直接报"Key 有效"——这是错的：可能是网关返回了纯文本错误、
+       * 或端点路径不对。报"有效"会让用户带着坏配置继续用。
+       * 但也不能一口咬定失败（鉴权确实通过了），所以分开说。
+       */
+      return setProbe({
+        kind: 'ok',
+        message: `Key 有效，但响应不是 JSON（${res.body.slice(0, 40).replace(/\s+/g, ' ') || '空'}…）`,
+      });
     }
   };
 
@@ -150,23 +181,57 @@ function ProviderRow({
       {expanded && (
         <div className="pb-[var(--sp-3)] pl-[calc(1.9em+var(--sp-2))]">
           <div className="relative">
+            {/* 右侧两个按钮各占 2em，输入框避开它们，否则长 Key 会被按钮压住 */}
             <input
               type={show ? 'text' : 'password'}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={spec.hint}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
               spellCheck={false}
-              className={cx(INPUT_CLS, 'pr-[2.4em]')}
+              inputMode="text"
+              className={cx(INPUT_CLS, 'pr-[5em]')}
             />
-            <button
-              type="button"
-              onClick={() => setShow((s) => !s)}
-              aria-label={show ? '隐藏' : '显示'}
-              className="absolute right-[var(--sp-2)] top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            >
-              {show ? <EyeOff size="0.95em" /> : <Eye size="0.95em" />}
-            </button>
+            {/*
+              粘贴按钮：WebView 里 type=password 的输入框在部分国产 ROM 上
+              长按不弹系统菜单，用户没法粘贴 API Key。这里显式向原生要剪贴板，
+              浏览器环境退回 navigator.clipboard。
+
+              两个按钮放进一个 flex 容器统一排版，不要各自 absolute：
+               试过给每个按钮加 padding 扩触控区，结果两者宽度从 13px 涨到 29px，
+               互相重叠 5.6px，右侧那个还越出了输入框边界。
+               容器定宽 + 子项等宽，才是能保证不重叠的写法。
+            */}
+            <div className="absolute right-[var(--sp-1)] top-1/2 flex -translate-y-1/2 items-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  const text = await readClipboardText();
+                  if (!text) {
+                    setProbe({ kind: 'fail', message: '剪贴板为空，或未授权读取' });
+                    return;
+                  }
+                  setDraft(text);
+                  setProbe({ kind: 'idle' });
+                }}
+                aria-label="从剪贴板粘贴"
+                title="从剪贴板粘贴"
+                className="flex h-[2em] w-[2em] items-center justify-center rounded-[0.4em] text-[var(--text-muted)] hover:text-[var(--text-primary)] active:bg-[var(--bg-hover)]"
+              >
+                <ClipboardPaste size="0.95em" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShow((s) => !s)}
+                aria-label={show ? '隐藏' : '显示'}
+                title={show ? '隐藏' : '显示'}
+                className="flex h-[2em] w-[2em] items-center justify-center rounded-[0.4em] text-[var(--text-muted)] hover:text-[var(--text-primary)] active:bg-[var(--bg-hover)]"
+              >
+                {show ? <EyeOff size="0.95em" /> : <Eye size="0.95em" />}
+              </button>
+            </div>
           </div>
 
           {value && (

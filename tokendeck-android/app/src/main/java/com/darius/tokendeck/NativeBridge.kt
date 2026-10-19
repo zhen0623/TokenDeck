@@ -160,7 +160,25 @@ class NativeBridge(
 
     private fun deliver(id: String, payload: String) {
         main.post {
-            val js = "window.__nativeResolve(${JSONObject.quote(id)}, $payload)"
+            /*
+             * payload 必须用 JSONObject.quote 包成字符串字面量，不能原样拼接。
+             *
+             * 原因：payload 本身是一段 JSON 文本（perform() 返回的 JSONObject.toString()），
+             * 而前端 window.__nativeResolve 收到后会执行 JSON.parse(payload)。
+             *
+             * 若原样拼进去：  window.__nativeResolve("r1", {"ok":true,...})
+             *   → JS 把第二个参数当成**对象**求值，typeof 为 object，
+             *     前端再 JSON.parse(object) 直接抛
+             *     SyntaxError: "[object Object]" is not valid JSON
+             *   → 落入 catch，报"原生返回格式异常"。
+             *
+             * 加 quote 后：   window.__nativeResolve("r1", "{\"ok\":true,...}")
+             *   → 收到字符串，JSON.parse 正常。
+             *
+             * 这个 bug 从 0.2 一直到 0.9.1 都存在：App 内"测试连接"必然失败，
+             * 且与厂商无关。浏览器里走 fetch 分支所以不复现，只在真机暴露。
+             */
+            val js = "window.__nativeResolve(${JSONObject.quote(id)}, ${JSONObject.quote(payload)})"
             webView.evaluateJavascript(js, null)
         }
     }
@@ -197,6 +215,33 @@ class NativeBridge(
                 }
                 webView.evaluateJavascript(js, null)
             }
+        }
+    }
+
+    /**
+     * 读剪贴板纯文本。
+     *
+     * 为什么需要这个：WebView 里 <input type="password"> 在部分安卓版本
+     * （尤其国产 ROM）不弹系统长按菜单，用户没法把 API Key 粘进去，
+     * 只能逐字敲。前端因此提供一个"粘贴"按钮，直接向原生要剪贴板内容。
+     *
+     * 返回空字符串表示剪贴板为空或类型不对（不是文本），前端据此提示。
+     * 只读、不写、不上送，内容仅回传给当前 WebView。
+     */
+    @JavascriptInterface
+    fun readClipboard(): String {
+        val ctx = webView.context
+        return try {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as? android.content.ClipboardManager
+                ?: return ""
+            val clip = cm.primaryClip ?: return ""
+            if (clip.itemCount == 0) return ""
+            // 有些 ROM 会把 URI/Intent 放进剪贴板，toString 会得到授权串，需排除
+            clip.getItemAt(0).text?.toString()?.trim() ?: ""
+        } catch (e: Exception) {
+            // 部分系统在后台读剪贴板会抛 SecurityException，静默降级为空
+            ""
         }
     }
 

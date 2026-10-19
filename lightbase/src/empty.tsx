@@ -39,17 +39,33 @@ export function StatSkeleton({
   hint?: string;
 }) {
   return (
-    <div className="lb-liquid p-[var(--pad-card)]" data-glass-tier="1">
-      <div className="mb-[var(--sp-2)] flex items-center gap-[var(--sp-2)]">
-        <span className="flex h-[1.75em] w-[1.75em] items-center justify-center rounded-[0.5em] bg-[var(--bg-hover)] text-[var(--text-faint)]">
+    /*
+     * 横向排布：图标 + 标签在左，占位值右对齐，说明文字缩进到第二行。
+     *
+     * 原来是纵向三段（图标行 / 数值行 / 说明行），手机上单卡高 102.7px，
+     * 三张叠起来吃掉小半屏。改成横向后约 47px，正好一半。
+     *
+     * borderRadius 必须显式写：这个组件直接挂 .lb-liquid 类，不走 LiquidGlass，
+     * 而 .lb-liquid 自身没有 border-radius 规则（圆角只由组件的内联样式提供）。
+     * 漏了这行就是直角，与旁边所有 10px 圆角的卡片不一致。
+     */
+    <div
+      className="lb-liquid px-[var(--pad-card)] py-[0.5em]"
+      style={{ borderRadius: 10 }}
+      data-glass-tier="1"
+    >
+      <div className="flex items-center gap-[0.5em]">
+        <span className="flex h-[1.5em] w-[1.5em] shrink-0 items-center justify-center rounded-[0.45em] bg-[var(--bg-hover)] text-[var(--text-faint)]">
           {icon}
         </span>
-        <span className="text-[0.82em] text-[var(--text-muted)]">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-[0.8em] text-[var(--text-muted)]">
+          {label}
+        </span>
+        <span className="shrink-0 text-[1.1em] font-semibold leading-none text-[var(--text-faint)]">
+          —
+        </span>
       </div>
-      <div className="flex items-end gap-[var(--sp-2)]">
-        <span className="text-[1.5em] font-semibold leading-none text-[var(--text-faint)]">—</span>
-      </div>
-      <div className="mt-[0.3em] text-[0.8em] text-[var(--text-faint)]">
+      <div className="mt-[0.15em] truncate pl-[2em] text-[0.68em] text-[var(--text-faint)]">
         {hint ?? '等待配置'}
       </div>
     </div>

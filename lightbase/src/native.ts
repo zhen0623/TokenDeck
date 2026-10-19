@@ -15,6 +15,8 @@ interface NativeBridge {
   allowHost?: (host: string) => void;
   saveText?: (filename: string, content: string) => void;
   pickText?: () => void;
+  /** 读剪贴板纯文本，无内容返回空串 */
+  readClipboard?: () => string;
 }
 
 declare global {
@@ -37,6 +39,33 @@ export interface HttpResponse {
 
 export function hasNativeBridge(): boolean {
   return typeof window !== 'undefined' && !!window.NativeApi;
+}
+
+/**
+ * 读剪贴板。
+ *
+ * 两条路径，原因不同：
+ *  - 原生壳：WebView 里 <input type="password"> 在部分安卓 ROM 上不弹长按菜单，
+ *    用户根本没法粘贴，必须走 NativeBridge.readClipboard()。
+ *  - 浏览器：navigator.clipboard.readText() 需要安全上下文与用户授权，
+ *    失败就返回空串，让调用方提示"请手动粘贴"，不要吞掉不报。
+ */
+export async function readClipboardText(): Promise<string> {
+  if (hasNativeBridge() && window.NativeApi?.readClipboard) {
+    try {
+      return (window.NativeApi.readClipboard() ?? '').trim();
+    } catch {
+      return '';
+    }
+  }
+  try {
+    if (navigator.clipboard?.readText) {
+      return (await navigator.clipboard.readText()).trim();
+    }
+  } catch {
+    /* 未授权或无安全上下文 */
+  }
+  return '';
 }
 
 /**
@@ -155,12 +184,21 @@ export function pickTextFile(): Promise<{ text: string | null; cancelled: boolea
 
 // 原生回调用全局函数，这里挂一次
 if (typeof window !== 'undefined') {
-  window.__nativeResolve = (id: string, payload: string) => {
+  window.__nativeResolve = (id: string, payload: string | HttpResponse) => {
     const cb = pending.get(id);
     if (!cb) return;
     pending.delete(id);
     try {
-      cb(JSON.parse(payload) as HttpResponse);
+      /*
+       * 兼容两种回传形态。
+       *
+       * 原生侧 deliver() 曾把 payload 原样拼进 JS 调用，导致这里是
+       * object 而不是 string，JSON.parse 抛 "[object Object]"，
+       * 全部请求都退化到 catch 报"原生返回格式异常"。
+       * 原生已改为 JSONObject.quote(payload) 正常传字符串；
+       * 这里仍保留对象分支，避免旧版 APK 配新版前端时再次踩坑。
+       */
+      cb(typeof payload === 'string' ? (JSON.parse(payload) as HttpResponse) : payload);
     } catch {
       cb({ ok: false, status: 0, body: '', error: '原生返回格式异常' });
     }

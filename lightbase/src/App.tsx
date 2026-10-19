@@ -61,46 +61,57 @@ function StatCard({
   const up = (delta ?? 0) >= 0;
   return (
     <LiquidGlass radius={10} bezel={24} strength={14} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-      <div className="p-[var(--pad-card)]">
-        <div className="mb-[0.6em] flex items-center gap-[var(--sp-2)]">
+      {/*
+       * 横向两行：第一行 图标+标签 … 右侧数值；第二行 说明（缩进）+ 可选进度条。
+       * 原来是纵向四段（图标行 / 数值行 / 说明行 / 进度条），手机单卡 102.7px。
+       * 改成横向后约 47px —— 正好是原来的一半。
+       * 数值必须 shrink-0 且不换行：三卡并排时宽度由 StatGrid 决定，
+       * 让数值参与换行会把卡片重新撑高，等于白改。
+       */}
+      <div className="px-[var(--pad-card)] py-[0.5em]">
+        <div className="flex items-center gap-[0.5em]">
           <span
-            className="flex h-[1.9em] w-[1.9em] items-center justify-center rounded-[0.5em]"
+            className="flex h-[1.5em] w-[1.5em] shrink-0 items-center justify-center rounded-[0.45em]"
             style={{ background: `${accent}1f`, color: accent }}
           >
             {icon}
           </span>
-          <span className="text-[0.82em] text-[var(--text-muted)]">{label}</span>
-        </div>
-
-        <div className="flex min-w-0 flex-wrap items-end gap-x-[0.45em] gap-y-[0.25em]">
-          <span className="min-w-0 break-all text-[1.5em] font-semibold leading-none tabular-nums text-[var(--text-primary)]">
+          <span className="min-w-0 flex-1 truncate text-[0.8em] text-[var(--text-muted)]">
+            {label}
+          </span>
+          <span className="shrink-0 whitespace-nowrap text-[1.1em] font-semibold leading-none tabular-nums text-[var(--text-primary)]">
             {value}
           </span>
           {delta !== undefined && (
             <span
               className={cx(
-                'mb-[0.1em] inline-flex items-center gap-[var(--sp-1)] rounded-[0.4em] px-[var(--sp-1)] py-[0.05em] text-[0.75em] font-medium',
+                'inline-flex shrink-0 items-center gap-[0.2em] rounded-[0.35em] px-[0.3em] py-[0.1em] text-[0.68em] font-medium',
                 up
                   ? 'bg-[rgb(250_81_81_/_0.12)] text-[var(--color-danger)]'
                   : 'bg-[var(--brand-green-10)] text-[var(--brand-green-text)]',
               )}
             >
-              {up ? <TrendingUp size="0.85em" /> : <TrendingDown size="0.85em" />}
+              {up ? <TrendingUp size="0.8em" /> : <TrendingDown size="0.8em" />}
               {fmtDelta(delta)}
             </span>
           )}
         </div>
 
-        {sub && <div className="mt-[0.3em] text-[0.8em] text-[var(--text-faint)]">{sub}</div>}
-
-        {progress !== undefined && (
-          <div className="mt-[0.7em] h-[5px] w-full overflow-hidden rounded-full bg-[var(--bg-track)]">
-            <div
-              className="h-full rounded-full transition-[width] duration-500"
-              style={{ width: `${Math.min(100, progress)}%`, background: accent }}
-            />
-          </div>
-        )}
+        <div className="mt-[0.15em] flex items-center gap-[0.5em] pl-[2em]">
+          {sub && (
+            <span className="min-w-0 flex-1 truncate text-[0.68em] text-[var(--text-faint)]">
+              {sub}
+            </span>
+          )}
+          {progress !== undefined && (
+            <div className="ml-auto h-[4px] w-[3.2em] shrink-0 overflow-hidden rounded-full bg-[var(--bg-track)]">
+              <div
+                className="h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${Math.min(100, progress)}%`, background: accent }}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </LiquidGlass>
   );
@@ -550,16 +561,22 @@ function BottomDock({ active, onSelect }: { active: string; onSelect: (id: strin
       blur={14}
       tint="rgba(255,255,255,0.52)"
       tintDark="rgba(20,24,31,0.58)"
-      /* 尺寸演进（都经过真机截图比对）：
-         1.2em(17px) 只比卡片多缩 2.8px —— 肉眼等于没缩，读作通栏
-         1.5em(21px) 多缩 7px           —— 能看出收窄，但横向仍偏宽
-         2.4em(34px) 390 宽下 322.8px   —— 上一版
-         当前：宽度 = 视口的 55%（390 下 215px），正好是上一版的 2/3。
-         用百分比而不是 em 内缩，才能在 360/480 各档都保持同样的相对宽度；
-         写死 em 内缩会让 360 屏上窄到放不下两字标签。
-         高度配 py 7.8px → 61.8px（比上一版 +3px，按 px 给值才能精确到像素）。
-         两个条件缺一不可：① 明显窄于内容卡  ② 两端是半圆（radius 999 被夹到高度一半） */
-      className="lb-dock fixed left-1/2 w-[55%] -translate-x-1/2 bottom-[max(0.5em,env(safe-area-inset-bottom,0px))] flex items-stretch rounded-full py-[7.8px] md:hidden"
+      /* 宽度策略：手机贴边 2px，平板收到 30em 上限并居中。
+         两个数字都必须有，缺一个就会在另一类设备上出问题：
+
+         ① 只用百分比（历史 bug）：w-[55%] 在 390 屏下仅 215px，
+            每项 33px，而胶囊本身 32.7px —— 胶囊顶满格子，图标文字被挤出变形。
+
+         ② 只贴边不给上限（也是 bug）：744px 的平板竖屏仍走手机布局
+            （md 断点 768），dock 被撑到 740px，每项 123px，
+            图标散得太开，读起来是一条通栏而不是悬浮胶囊。
+
+         现在：width = min(视口 - 4px, 30em)，居中。
+           320 → 316（每项 52.7）   390 → 386（64.3）   744 → 420（70）
+         两边 2px 在手机上满足"贴边"观感，30em 上限保证大屏不散架。
+         竖向 py 固定 7.8px（不用 em）：字号档位变化时高度不该跟着涨，
+         否则大字号下 dock 会变胖、遮住更多内容。 */
+      className="lb-dock fixed bottom-[max(0.5em,env(safe-area-inset-bottom,0px))] left-1/2 w-[calc(100%-4px)] max-w-[30em] -translate-x-1/2 flex items-stretch rounded-full py-[7.8px] md:hidden"
       aria-label="主导航"
     >
       {NAV.map((n) => {
