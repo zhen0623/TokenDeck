@@ -7,11 +7,9 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  Gauge,
   RefreshCw,
   ArrowUpRight,
   Zap,
-  Clock,
   CircleDollarSign,
   Settings,
   KeyRound,
@@ -20,24 +18,22 @@ import { ThemeProvider } from './theme';
 import { RefreshProvider, useRefresh, fmtCountdown } from './refresh';
 import { LiquidGlass } from './liquid-glass';
 import { Segmented, Badge, cx } from './ui';
-import { StackedAreaChart, Sparkline, Donut, RankBar } from './charts';
 import { SystemSettingsPage } from './SystemSettingsPage';
 import { ProvidersPage } from './ProvidersPage';
 import { EmptyBlock, StatSkeleton } from './empty';
-import { BillingDetail, PriceHint } from './BillingDetail';
+import { BillingDetail } from './BillingDetail';
 import { APP_VERSION } from './version';
 import { loadKeys } from './settings';
 import {
-  PLATFORMS,
-  MODELS,
-  totals,
-  dailyTotals,
   fmtTokens,
   fmtMoney,
-  fmtDelta,
-  platformOf,
-  type PlatformId,
-} from './data';
+  summarize,
+  useLive,
+  LiveProvider,
+  type LiveModel,
+  type LivePlatform,
+} from './live';
+import { compactPrice } from './pricing';
 
 /* ============================================================ 顶部指标卡 */
 
@@ -119,17 +115,14 @@ function StatCard({
 
 /* ============================================================ 平台卡片 */
 
-function PlatformCard({ p }: { p: (typeof PLATFORMS)[number] }) {
-  const usedPct = (p.quotaUsed / p.quotaTotal) * 100;
-  const ratePct = (p.rateUsed / p.rateLimit) * 100;
-  const delta = (p.todayTokens - p.yesterdayTokens) / Math.max(1, p.yesterdayTokens);
-
+function PlatformCard({ p }: { p: LivePlatform }) {
   const statusMap = {
-    healthy: { tone: 'success' as const, text: '正常', icon: CheckCircle2 },
-    warning: { tone: 'warning' as const, text: '注意', icon: AlertTriangle },
-    critical: { tone: 'danger' as const, text: '告急', icon: AlertTriangle },
+    ok: { tone: 'success' as const, text: '连接正常', icon: CheckCircle2 },
+    auth: { tone: 'danger' as const, text: 'Key 无效', icon: AlertTriangle },
+    error: { tone: 'warning' as const, text: '请求异常', icon: AlertTriangle },
   }[p.status];
   const StatusIcon = statusMap.icon;
+  const symbol = p.currency === 'CNY' ? '¥' : '$';
 
   return (
     <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.38)" tintDark="rgba(26,30,38,0.42)">
@@ -137,7 +130,12 @@ function PlatformCard({ p }: { p: (typeof PLATFORMS)[number] }) {
         {/* 头部 */}
         <div className="mb-[var(--sp-3)] flex items-start gap-[var(--sp-2)]">
           <span
-            className="mt-[0.15em] h-[0.7em] w-[0.7em] shrink-0 rounded-full"
+            /*
+             * 圆点要和「平台名首行」垂直居中，不是和整块（名称+备注两行）居中。
+             * 名称行高 1.5 × 0.98em = 1.47em，圆点 0.7em，
+             * 上偏移 = (1.47 - 0.7) / 2 = 0.385em。
+             */
+            className="mt-[0.385em] h-[0.7em] w-[0.7em] shrink-0 rounded-full"
             style={{ background: p.color, boxShadow: `0 0 8px ${p.color}80` }}
           />
           <div className="min-w-0 flex-1">
@@ -152,65 +150,34 @@ function PlatformCard({ p }: { p: (typeof PLATFORMS)[number] }) {
           </Badge>
         </div>
 
-        {/* 余额 */}
-        <div className="mb-[0.65em] flex items-baseline justify-between">
-          <span className="text-[0.78em] text-[var(--text-muted)]">余额</span>
+        {/*
+         * 只展示真实取到的值。余额留空就写「—」，并说明原因，
+         * 不做「看起来有数」的占位。
+         */}
+        <div className="mb-[0.35em] flex items-baseline justify-between">
+          <span className="text-[0.78em] text-[var(--text-muted)]">账户余额</span>
           <span className="text-[1.05em] font-semibold tabular-nums text-[var(--text-primary)]">
-            ${fmtMoney(p.balance)}
+            {p.balance !== null ? `${symbol}${fmtMoney(p.balance)}` : '—'}
           </span>
         </div>
-
-        {/* 今日消耗 */}
-        <div className="mb-[0.5em] flex items-center justify-between text-[0.8em]">
-          <span className="text-[var(--text-muted)]">今日消耗</span>
-          <span className="flex items-center gap-[var(--sp-1)]">
-            <span className="tabular-nums text-[var(--text-secondary)]">
-              {fmtTokens(p.todayTokens)}
-            </span>
-            <span
-              className={cx(
-                'tabular-nums text-[0.92em]',
-                delta >= 0 ? 'text-[var(--color-danger)]' : 'text-[var(--brand-green-text)]',
-              )}
-            >
-              {fmtDelta(delta)}
-            </span>
-          </span>
-        </div>
-
-        {/* 配额进度 */}
-        <div className="mb-[0.35em] flex items-center justify-between text-[0.78em]">
-          <span className="text-[var(--text-muted)]">配额已用</span>
-          <span className="tabular-nums text-[var(--text-secondary)]">
-            {usedPct.toFixed(1)}%
-          </span>
-        </div>
-        <div className="h-[5px] w-full overflow-hidden rounded-full bg-[var(--bg-track)]">
-          <div
-            className="h-full rounded-full transition-[width] duration-500"
-            style={{
-              width: `${Math.min(100, usedPct)}%`,
-              background: usedPct > 85 ? 'var(--color-danger)' : usedPct > 70 ? 'var(--color-warning)' : p.color,
-            }}
-          />
-        </div>
-
-        {/* 速率 */}
-        <div className="mt-[0.6em] flex items-center gap-[var(--sp-1)] text-[0.75em] text-[var(--text-faint)]">
-          <Gauge size="0.9em" />
-          <span className="tabular-nums">
-            {p.rateUsed}/{p.rateLimit} RPM
-          </span>
-          <div className="ml-auto h-[3px] w-[3.5em] overflow-hidden rounded-full bg-[var(--bg-track)]">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(100, ratePct)}%`,
-                background: ratePct > 85 ? 'var(--color-danger)' : 'var(--brand-green)',
-              }}
-            />
+        {p.balance === null && (
+          <div className="mb-[0.5em] text-[0.72em] text-[var(--text-faint)]">
+            {p.balanceSupported ? '余额接口未返回可用金额' : '该厂商未提供余额查询接口'}
           </div>
+        )}
+
+        <div className="flex items-baseline justify-between text-[0.8em]">
+          <span className="text-[var(--text-muted)]">可用模型</span>
+          <span className="tabular-nums text-[var(--text-secondary)]">
+            {p.modelCount !== null ? `${p.modelCount} 个` : '—'}
+          </span>
         </div>
+
+        {p.message && (
+          <div className="mt-[var(--sp-3)] rounded-[var(--radius-sm)] bg-[var(--bg-hover)] px-[var(--sp-2)] py-[var(--sp-1)] text-[0.74em] leading-relaxed text-[var(--text-muted)]">
+            {p.message}
+          </div>
+        )}
       </div>
     </LiquidGlass>
   );
@@ -218,60 +185,56 @@ function PlatformCard({ p }: { p: (typeof PLATFORMS)[number] }) {
 
 /* ============================================================ 模型排行 */
 
-type SortKey = 'tokens' | 'cost' | 'calls' | 'latency' | 'errorRate';
+type SortKey = 'name' | 'price' | 'provider';
 
 function ModelTable({ items, sort, onSort }: {
-  items: typeof MODELS;
+  items: LiveModel[];
   sort: SortKey;
   onSort: (k: SortKey) => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const maxTokens = Math.max(...MODELS.map((m) => m.tokens));
-  const cols: Array<{ key: SortKey; label: string; align?: string }> = [
-    { key: 'tokens', label: 'Token 用量' },
-    { key: 'cost', label: '成本' },
-    { key: 'calls', label: '调用次数' },
-    { key: 'latency', label: '延迟' },
-    { key: 'errorRate', label: '错误率' },
+  const cols: Array<{ key: SortKey; label: string; className?: string }> = [
+    { key: 'name', label: '模型' },
+    { key: 'provider', label: '厂商', className: 'hidden sm:table-cell' },
+    { key: 'price', label: '单价 / 百万' },
   ];
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[0.86em] sm:min-w-[42em]">
+      <table className="w-full border-collapse text-[0.86em]">
         <thead>
           <tr className="border-b border-[var(--border-color)]">
             <th className="w-[2.2em] pb-[0.6em] text-left font-medium text-[var(--text-faint)]">#</th>
-            <th className="pb-[0.6em] text-left font-medium text-[var(--text-faint)]">模型</th>
             {cols.map((c) => (
               <th
                 key={c.key}
                 onClick={() => onSort(c.key)}
                 className={cx(
-                  'cursor-pointer select-none pb-[0.6em] text-right font-medium transition-colors duration-150',
-                  (c.key === 'calls' || c.key === 'latency' || c.key === 'errorRate') && 'hidden sm:table-cell',
-                  sort === c.key ? 'text-[var(--brand-green-text)]' : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]',
+                  'cursor-pointer select-none pb-[0.6em] font-medium transition-colors duration-150',
+                  c.key === 'price' ? 'text-right' : 'text-left',
+                  c.className,
+                  sort === c.key
+                    ? 'text-[var(--brand-green-text)]'
+                    : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]',
                 )}
               >
                 {c.label}
                 {sort === c.key && <span className="ml-[0.2em]">↓</span>}
               </th>
             ))}
-            <th className="hidden pb-[0.6em] pl-[0.8em] text-left font-medium text-[var(--text-faint)] sm:table-cell">走势</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((m, i) => {
-            const p = platformOf(m.platformId);
-            return (
-              <Fragment key={m.id}>
+          {items.map((m, i) => (
+            <Fragment key={`${m.platformId}:${m.id}`}>
               <tr
-                onClick={() => setOpenId(openId === m.id ? null : m.id)}
+                onClick={() => setOpenId(openId === `${m.platformId}:${m.id}` ? null : `${m.platformId}:${m.id}`)}
                 className={cx(
                   'cursor-pointer border-b border-[var(--border-muted)] transition-colors duration-150 hover:bg-[var(--bg-hover)]',
-                  openId === m.id && 'bg-[var(--bg-hover)]',
+                  openId === `${m.platformId}:${m.id}` && 'bg-[var(--bg-hover)]',
                 )}
               >
-                <td className="py-[var(--sp-2)]">
+                <td className="align-top py-[var(--sp-2)]">
                   <span
                     className={cx(
                       'tabular-nums',
@@ -281,68 +244,51 @@ function ModelTable({ items, sort, onSort }: {
                     {i + 1}
                   </span>
                 </td>
-                <td className="py-[var(--sp-2)] pr-[0.8em]">
+                <td className="align-top py-[var(--sp-2)] pr-[0.8em]">
                   <div className="flex items-center gap-[var(--sp-1)]">
                     <span
-                      className="h-[0.5em] w-[0.5em] shrink-0 rounded-full"
-                      style={{ background: p.color }}
+                      /*
+                       * 圆点对齐「模型名首行」中心，不是两行整体中心。
+                       * items-center 会按两行居中，实测低 7.4px，看着掉到副行。
+                       */
+                      className="mt-[0.5em] h-[0.5em] w-[0.5em] shrink-0 self-start rounded-full"
+                      style={{ background: m.color }}
                     />
                     <div className="min-w-0">
                       <div className="truncate font-medium text-[var(--text-primary)]">{m.name}</div>
-                      <div className="flex items-center gap-[0.3em] text-[0.82em] text-[var(--text-faint)]">
-                        <span className="truncate">{p.name}</span>
-                        <span className="shrink-0">·</span>
-                        <PriceHint modelId={m.id} providerId={m.platformId} />
-                      </div>
+                      <div className="truncate text-[0.78em] text-[var(--text-faint)]">{m.id}</div>
                     </div>
                   </div>
                 </td>
-                <td className="py-[var(--sp-2)] text-right">
-                  <div className="tabular-nums text-[var(--text-secondary)]">{fmtTokens(m.tokens)}</div>
-                  <div className="mt-[0.25em]">
-                    <RankBar value={m.tokens} max={maxTokens} color={p.color} />
-                  </div>
+                <td className="hidden align-top py-[var(--sp-2)] pr-[0.8em] sm:table-cell">
+                  <span className="truncate text-[0.82em] text-[var(--text-muted)]">{m.platformName}</span>
                 </td>
-                <td className="py-[var(--sp-2)] text-right tabular-nums text-[var(--text-secondary)]">
-                  ${fmtMoney(m.cost)}
-                </td>
-                <td className="hidden py-[var(--sp-2)] text-right tabular-nums text-[var(--text-secondary)] sm:table-cell">
-                  {m.calls.toLocaleString()}
-                </td>
-                <td className="hidden py-[var(--sp-2)] text-right tabular-nums text-[var(--text-secondary)] sm:table-cell">
-                  {m.latency >= 1000 ? `${(m.latency / 1000).toFixed(1)}s` : `${m.latency}ms`}
-                </td>
-                <td className="hidden py-[var(--sp-2)] text-right tabular-nums sm:table-cell">
-                  <span
-                    className={
-                      m.errorRate > 0.008
-                        ? 'text-[var(--color-danger)]'
-                        : m.errorRate > 0.005
-                          ? 'text-[var(--color-warning)]'
-                          : 'text-[var(--text-secondary)]'
-                    }
-                  >
-                    {(m.errorRate * 100).toFixed(1)}%
-                  </span>
-                </td>
-                <td className="hidden py-[var(--sp-2)] pl-[0.8em] sm:table-cell">
-                  <Sparkline values={m.trend} color={p.color} />
+                {/*
+                 * 单价来自内置参考表（pricing.ts），不是厂商实时返回。
+                 * 用 compactPrice 统一格式，未收录的显示「未收录」而不是 0。
+                 * whitespace-nowrap：320px 下金额会被拆成三行。
+                 */}
+                {/*
+                 * 单价是「参考价」而非实时账单：聚合网关的 /models 可能带真实单价，
+                 * 但在能确认来源之前，不把它当成帐户实际扣费。
+                 */}
+                <td className="whitespace-nowrap align-top py-[var(--sp-2)] pl-[0.4em] text-right text-[0.82em] tabular-nums text-[var(--text-secondary)]">
+                  {compactPrice(m.pricing)}
                 </td>
               </tr>
-              {openId === m.id && (
+              {openId === `${m.platformId}:${m.id}` && (
                 <tr className="border-b border-[var(--border-muted)]">
-                  <td colSpan={8} className="pb-[var(--sp-3)] pt-[var(--sp-1)]">
+                  <td colSpan={4} className="pb-[var(--sp-3)] pt-[var(--sp-1)]">
                     <BillingDetail
                       modelId={m.id}
                       providerId={m.platformId}
-                      providerName={p.name}
+                      providerName={m.platformName}
                     />
                   </td>
                 </tr>
               )}
-              </Fragment>
-            );
-          })}
+            </Fragment>
+          ))}
         </tbody>
       </table>
     </div>
@@ -391,12 +337,13 @@ function StatGrid({ children }: { children: React.ReactNode }) {
 
 function TopBar() {
   const { refreshing, interval, countdown } = useRefresh();
-  const hasKeys = Object.keys(loadKeys()).length > 0;
+  const { platforms, models, loading } = useLive();
+  const configured = platforms.length > 0;
 
   return (
     <LiquidGlass
       as="header"
-      /* 圆角与内容卡片统一为 14。
+      /* 圆角与内容卡片统一为 10。
          之前顶栏 16、dock 18、卡片 14，三者圆角不同会让边缘的抗锯齿范围不同，
          实测像素边缘因此差 1–2px —— 看起来就是"没对齐"。 */
       radius={10}
@@ -413,10 +360,16 @@ function TopBar() {
         <h1 className="truncate text-[1.05em] font-semibold text-[var(--text-primary)]">
           Token 用量监控
         </h1>
+        {/*
+         * 副标题只写真实数量。原来写死「5 个平台 · 12 个模型 · 近 30 天」，
+         * 那是假数据的长度；现在按实际拉到的数据算，没配 Key 就直说。
+         */}
         <p className="hidden truncate text-[0.76em] text-[var(--text-muted)] sm:block">
-          {hasKeys
-            ? `${PLATFORMS.length} 个平台 · ${MODELS.length} 个模型 · 近 30 天`
-            : '未配置 Key · 不显示任何数据'}
+          {loading
+            ? '正在读取…'
+            : configured
+              ? `${platforms.length} 个厂商 · ${models.length} 个模型`
+              : '未配置 Key · 不显示任何数据'}
           {interval > 0 && countdown !== null && (
             <span className="ml-[0.6em] text-[var(--text-faint)]">
               自动刷新 {fmtCountdown(countdown)}
@@ -458,7 +411,8 @@ const NAV = [
 
 /** 桌面侧栏（md 及以上）。手机端不用抽屉，改用底部 dock。 */
 function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
-  const t = totals();
+  const { platforms } = useLive();
+  const sum = summarize(platforms);
   const hasKeys = Object.keys(loadKeys()).length > 0;
   return (
     <LiquidGlass
@@ -504,23 +458,48 @@ function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) 
           })}
         </nav>
 
-        {/* 余额摘要 */}
+        {/*
+         * 余额摘要只统计真实取到的余额。
+         *
+         * 关键约束：绝不把美元和人民币加在一起 —— 那样得到的数字没有意义。
+         * 两个币种分开显示；只有一个币种时就只显示一个。
+         */}
         <div className="mt-[var(--sp-5)] rounded-[var(--radius-sm)] bg-[var(--bg-hover)] px-[var(--sp-3)] py-[var(--sp-2)]">
-          <div className="text-[0.74em] text-[var(--text-faint)]">总余额</div>
-          {hasKeys ? (
-            <>
-              <div className="text-[1.1em] font-semibold tabular-nums text-[var(--text-primary)]">
-                ${fmtMoney(t.balance)}
-              </div>
-              <div className="mt-[0.35em] text-[0.72em] text-[var(--text-muted)]">
-                可用余额
-              </div>
-            </>
-          ) : (
+          <div className="text-[0.74em] text-[var(--text-faint)]">余额</div>
+          {!hasKeys ? (
             <>
               <div className="text-[1.1em] font-semibold text-[var(--text-faint)]">—</div>
               <div className="mt-[0.35em] text-[0.72em] text-[var(--text-faint)]">
                 未配置 Key
+              </div>
+            </>
+          ) : sum.balanceCount === 0 ? (
+            <>
+              <div className="text-[1.1em] font-semibold text-[var(--text-faint)]">—</div>
+              <div className="mt-[0.35em] text-[0.72em] leading-relaxed text-[var(--text-faint)]">
+                {sum.balanceFailed > 0 ? '余额接口未返回金额' : '当前厂商不提供余额'}
+              </div>
+            </>
+          ) : (
+            <>
+              {sum.cnyProviders > 0 && (
+                <div className="text-[1.1em] font-semibold tabular-nums text-[var(--text-primary)]">
+                  ¥{fmtMoney(sum.cnyTotal)}
+                </div>
+              )}
+              {sum.usdProviders > 0 && (
+                <div
+                  className={
+                    sum.cnyProviders > 0
+                      ? 'text-[0.82em] tabular-nums text-[var(--text-muted)]'
+                      : 'text-[1.1em] font-semibold tabular-nums text-[var(--text-primary)]'
+                  }
+                >
+                  ${fmtMoney(sum.usdTotal)}
+                </div>
+              )}
+              <div className="mt-[0.35em] text-[0.72em] text-[var(--text-muted)]">
+                {sum.balanceCount} 个厂商已接入
               </div>
             </>
           )}
@@ -626,35 +605,35 @@ function BottomDock({ active, onSelect }: { active: string; onSelect: (id: strin
 /* ============================================================ 总览 */
 
 function Overview() {
-  const configured = Object.keys(loadKeys()).length > 0;
-  const t = totals();
-  const daily = dailyTotals();
-  const [range, setRange] = useState<'7' | '14' | '30'>('30');
+  const { platforms, models, loading } = useLive();
+  const sum = summarize(platforms);
+  const configured = platforms.length > 0;
 
-  const days = Number(range);
-  const series = PLATFORMS.map((p) => ({
-    id: p.id,
-    name: p.name,
-    color: p.color,
-    values: p.series.slice(-days),
-  }));
-  const dates = daily.slice(-days).map((d) => d.date);
-
-  const topModels = useMemo(
-    () => [...MODELS].sort((a, b) => b.tokens - a.tokens).slice(0, 5),
-    [],
-  );
-
-  const donutSegments = PLATFORMS.map((p) => ({
-    value: p.monthTokens,
-    color: p.color,
-    name: p.name,
-  }));
+  /*
+   * 余额一行只放得下一个数。两个币种都有时，主值给人民币（国内厂商居多），
+   * 美元放副行 —— 绝不相加，相加得到的数字没有意义。
+   */
+  const balanceValue =
+    sum.cnyProviders > 0
+      ? `¥${fmtMoney(sum.cnyTotal)}`
+      : sum.usdProviders > 0
+        ? `$${fmtMoney(sum.usdTotal)}`
+        : '—';
+  const balanceSub =
+    sum.cnyProviders > 0 && sum.usdProviders > 0
+      ? `另 $${fmtMoney(sum.usdTotal)}`
+      : sum.balanceCount > 0
+        ? `${sum.balanceCount} 个厂商已接入`
+        : sum.balanceFailed > 0
+          ? '余额接口未返回金额'
+          : configured
+            ? '当前厂商不提供余额接口'
+            : '未配置 Key';
 
   return (
     <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
       {/* 未配置 Key 时的醒目入口：避免用户找不到设置页 */}
-      {!configured && (
+      {!configured && !loading && (
         <a
           href="#providers"
           className={
@@ -668,178 +647,121 @@ function Overview() {
               还没配置模型 API Key
             </div>
             <div className="mt-[0.15em] text-[0.8em] leading-relaxed text-[var(--text-muted)]">
-              点这里填入 OpenAI / Anthropic / DeepSeek 等厂商的 Key，可验证有效性并读取余额。
+              点这里填入厂商的 Key，可验证有效性并读取真实余额与可用模型。
             </div>
           </div>
           <ArrowUpRight size="0.95em" className="mt-[0.15em] shrink-0 text-[var(--brand-green-text)]" />
         </a>
       )}
 
-      {/* 四个指标 */}
+      {/*
+       * 三张卡全部来自真实接口：
+       *   余额   ← 厂商 balance 接口（没有就显示「—」并说明）
+       *   厂商数 ← /models 的响应状态
+       *   模型数 ← /models 返回的条目数
+       * 没有一项是估算或占位。
+       */}
       <StatGrid>
-        {!configured ? (
+        {loading ? (
           <>
-            <StatSkeleton icon={<CircleDollarSign size="1em" />} label="账户总余额" />
-            <StatSkeleton icon={<Activity size="1em" />} label="今日消耗" />
-            <StatSkeleton icon={<Wallet size="1em" />} label="本月花费" />
+            <StatSkeleton icon={<CircleDollarSign size="1em" />} label="账户余额" />
+            <StatSkeleton icon={<Wallet size="1em" />} label="已接入厂商" />
+            <StatSkeleton icon={<Coins size="1em" />} label="可用模型" />
           </>
         ) : (
           <>
             <StatCard
               icon={<CircleDollarSign size="1em" />}
-              label="账户总余额"
-              value={`$${fmtMoney(t.balance)}`}
-              sub="5 个平台合计"
+              label="账户余额"
+              value={balanceValue}
+              sub={balanceSub}
               accent="#07C160"
             />
             <StatCard
-              icon={<Activity size="1em" />}
-              label="今日消耗"
-              value={fmtTokens(t.todayTokens)}
-              sub={`昨日 ${fmtTokens(t.yesterdayTokens)}`}
-              delta={t.dayDelta}
+              icon={<Wallet size="1em" />}
+              label="已接入厂商"
+              value={configured ? `${sum.okCount}/${platforms.length}` : '0'}
+              sub={
+                sum.badCount > 0 ? `${sum.badCount} 个连接异常` : configured ? '全部连接正常' : '尚未配置'
+              }
               accent="#FA9D3B"
             />
             <StatCard
-              icon={<Wallet size="1em" />}
-              label="本月花费"
-              value={`$${fmtMoney(t.monthCost)}`}
-              sub={`本月 ${fmtTokens(t.monthTokens)} tokens`}
+              icon={<Coins size="1em" />}
+              label="可用模型"
+              value={configured ? String(sum.modelTotal) : '0'}
+              sub={configured ? `${platforms.length} 个厂商合计` : '尚未配置'}
               accent="#D97757"
             />
           </>
         )}
       </StatGrid>
 
-      {/* 趋势图 + 平台占比 */}
-      <div className="grid gap-[var(--gap-grid)] xl:grid-cols-[1.7fr_1fr]">
-        <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-          <div className="p-[var(--pad-card)]">
-            <div className="mb-[var(--sp-3)] flex flex-wrap items-center gap-[var(--sp-2)]">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">Token 消耗趋势</h2>
-                <p className="text-[0.78em] text-[var(--text-faint)]">按平台堆叠 · 近 {days} 天</p>
-              </div>
-              <Segmented<'7' | '14' | '30'>
-                value={range}
-                onChange={setRange}
-                options={[
-                  { value: '7', label: '7天' },
-                  { value: '14', label: '14天' },
-                  { value: '30', label: '30天' },
-                ]}
-              />
-            </div>
-            {configured ? (
-              <>
-                <StackedAreaChart series={series} dates={dates} height={230} />
-                {/* 图例 */}
-                <div className="mt-[var(--sp-3)] flex flex-wrap gap-x-[var(--sp-4)] gap-y-[var(--sp-2)]">
-                  {PLATFORMS.map((p) => (
-                    <span key={p.id} className="flex items-center gap-[var(--sp-1)] text-[0.76em] text-[var(--text-muted)]">
-                      <span className="h-[0.55em] w-[0.55em] rounded-[0.15em]" style={{ background: p.color }} />
-                      {p.name}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <EmptyBlock
-                title="暂无趋势数据"
-                desc="配置 Key 后即可按平台展示逐日消耗。"
-                height="14em"
-              />
-            )}
-          </div>
-        </LiquidGlass>
-
-        <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-          <div className="flex h-full flex-col p-[var(--pad-card)]">
-            <h2 className="mb-[0.15em] text-[0.98em] font-medium text-[var(--text-primary)]">平台用量占比</h2>
-            <p className="mb-[var(--sp-3)] text-[0.78em] text-[var(--text-faint)]">近 30 天合计</p>
-            <div className="flex flex-1 flex-col items-center justify-center gap-[var(--sp-3)]">
-              {configured ? (
-                <>
-                  <Donut
-                    segments={donutSegments}
-                    size={144}
-                    thickness={14}
-                    centerValue={fmtTokens(t.monthTokens)}
-                    centerLabel="总消耗"
-                  />
-                  <div className="w-full space-y-[var(--sp-1)]">
-                    {PLATFORMS.map((p) => {
-                      const pct = (p.monthTokens / t.monthTokens) * 100;
-                      return (
-                        <div key={p.id} className="flex items-center gap-[var(--sp-2)] text-[0.78em]">
-                          <span className="h-[0.5em] w-[0.5em] shrink-0 rounded-full" style={{ background: p.color }} />
-                          <span className="truncate text-[var(--text-muted)]">{p.name}</span>
-                          <span className="ml-auto tabular-nums text-[var(--text-secondary)]">{pct.toFixed(1)}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                <EmptyBlock title="暂无占比" desc="配置后按平台展示用量构成。" height="12em" />
-              )}
-            </div>
-          </div>
-        </LiquidGlass>
-      </div>
-
-      {/* Top 模型 */}
+      {/* 厂商连接状态：每一行都是刚请求回来的真实结果 */}
       <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
         <div className="p-[var(--pad-card)]">
           <div className="mb-[var(--sp-3)] flex items-center justify-between gap-[var(--sp-2)]">
             <div className="min-w-0">
-              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">模型用量 Top 5</h2>
-              <p className="text-[0.78em] text-[var(--text-faint)]">按 token 消耗排序</p>
+              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">厂商连接状态</h2>
+              <p className="text-[0.78em] text-[var(--text-faint)]">
+                {loading ? '正在请求各厂商接口…' : '每次刷新都会重新请求'}
+              </p>
             </div>
-            {configured && (
-              <a href="#models" aria-label="查看全部模型">
-                <ArrowUpRight size="1.1em" className="text-[var(--text-faint)]" />
-              </a>
-            )}
+            <a href="#platforms" aria-label="查看平台详情">
+              <ArrowUpRight size="1.1em" className="text-[var(--text-faint)]" />
+            </a>
           </div>
-          {!configured && (
+
+          {!configured && !loading ? (
             <EmptyBlock
-              title="暂无模型排行"
-              desc="配置 Key 并接通用量数据后显示。"
+              title="暂无已连接厂商"
+              desc="配置 Key 后，这里逐行显示每个厂商的真实连接结果。"
               height="10em"
             />
+          ) : (
+            <div className="space-y-[var(--sp-2)]">
+              {platforms.map((p) => {
+                const symbol = p.currency === 'CNY' ? '¥' : '$';
+                const tone =
+                  p.status === 'ok' ? 'success' : p.status === 'auth' ? 'danger' : 'warning';
+                const text =
+                  p.status === 'ok' ? '正常' : p.status === 'auth' ? 'Key 无效' : '异常';
+                return (
+                  <div key={p.id} className="flex items-center gap-[var(--sp-2)] text-[0.84em]">
+                    <span
+                      className="h-[0.5em] w-[0.5em] shrink-0 rounded-full"
+                      style={{ background: p.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{p.name}</span>
+                    <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">
+                      {p.balance !== null ? `${symbol}${fmtMoney(p.balance)}` : '—'}
+                    </span>
+                    <span className="w-[3.4em] shrink-0 text-right tabular-nums text-[var(--text-faint)]">
+                      {p.modelCount !== null ? `${p.modelCount} 模型` : '—'}
+                    </span>
+                    <Badge tone={tone}>{text}</Badge>
+                  </div>
+                );
+              })}
+            </div>
           )}
-          <div className={configured ? 'space-y-[var(--sp-2)]' : 'hidden'}>
-            {topModels.map((m, i) => {
-              const p = platformOf(m.platformId);
-              const maxTokens = topModels[0].tokens;
-              return (
-                <div key={m.id} className="flex items-center gap-[var(--sp-2)]">
-                  <span
-                    className={cx(
-                      'w-[1.1em] shrink-0 text-center text-[0.82em] tabular-nums',
-                      i === 0 ? 'font-bold text-[var(--brand-green-text)]' : 'text-[var(--text-faint)]',
-                    )}
-                  >
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-[2]">
-                    <div className="truncate text-[0.86em] font-medium text-[var(--text-primary)]">{m.name}</div>
-                    <div className="truncate text-[0.74em] text-[var(--text-faint)]">{p.name}</div>
-                  </div>
-                  <div className="flex-[3]">
-                    <RankBar value={m.tokens} max={maxTokens} color={p.color} />
-                  </div>
-                  <span className="w-[4em] shrink-0 text-right text-[0.8em] tabular-nums text-[var(--text-secondary)]">
-                    {fmtTokens(m.tokens)}
-                  </span>
-                  <span className="hidden w-[3.6em] shrink-0 text-right text-[0.78em] tabular-nums text-[var(--text-faint)] sm:block">
-                    ${fmtMoney(m.cost)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+        </div>
+      </LiquidGlass>
+
+      {/*
+       * 用量历史：明确写出「未接入」而不是画一条假的曲线。
+       * 这一段存在的意义是告诉用户为什么看不到消耗趋势，
+       * 以及需要什么才能看到 —— 而不是用动画掩盖数据缺失。
+       */}
+      <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
+        <div className="p-[var(--pad-card)]">
+          <h2 className="mb-[0.15em] text-[0.98em] font-medium text-[var(--text-primary)]">用量历史</h2>
+          <p className="mb-[var(--sp-3)] text-[0.78em] text-[var(--text-faint)]">逐日消耗 · 尚未接入</p>
+          <EmptyBlock
+            title="没有用量数据源"
+            desc="当前只接入了「模型清单」与「余额」两类接口。逐日 token 消耗、调用次数、延迟需要厂商提供用量或账单接口，或由本地代理记账。接入前这里保持为空，不显示估算值。"
+            height="9em"
+          />
         </div>
       </LiquidGlass>
     </div>
@@ -849,15 +771,16 @@ function Overview() {
 /* ============================================================ 平台页 */
 
 function PlatformsPage() {
-  const configured = Object.keys(loadKeys()).length > 0;
+  const { platforms, loading } = useLive();
+  const configured = platforms.length > 0;
 
-  if (!configured) {
+  if (!configured && !loading) {
     return (
       <div className="lb-enter flex h-full min-h-[calc(100vh-9em)] items-center justify-center p-[var(--pad-page)]">
         <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)" className="w-full">
           <EmptyBlock
             title="还没有已连接的平台"
-            desc="配置厂商 API Key 后，这里会按平台显示余额、配额占用和速率限制。"
+            desc="配置厂商 API Key 后，这里会显示每个厂商的真实余额与可用模型数。"
             height="16em"
             action={
               <a
@@ -877,7 +800,7 @@ function PlatformsPage() {
   return (
     <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
       <div className="grid gap-[var(--gap-grid)] sm:grid-cols-2 xl:grid-cols-3">
-        {PLATFORMS.map((p) => (
+        {platforms.map((p) => (
           <PlatformCard key={p.id} p={p} />
         ))}
       </div>
@@ -888,22 +811,34 @@ function PlatformsPage() {
 /* ============================================================ 模型页 */
 
 function ModelsPage() {
-  const configured = Object.keys(loadKeys()).length > 0;
-  const [sort, setSort] = useState<SortKey>('tokens');
-  const [filter, setFilter] = useState<PlatformId | 'all'>('all');
+  const { platforms, models, loading } = useLive();
+  const [sort, setSort] = useState<SortKey>('name');
+  const [filter, setFilter] = useState<string>('all');
+  const configured = platforms.length > 0;
 
   const items = useMemo(() => {
-    const base = filter === 'all' ? MODELS : MODELS.filter((m) => m.platformId === filter);
-    return [...base].sort((a, b) => (b[sort] as number) - (a[sort] as number));
-  }, [sort, filter]);
+    const base = filter === 'all' ? models : models.filter((m) => m.platformId === filter);
+    const sorted = [...base];
+    sorted.sort((a, b) => {
+      if (sort === 'provider') return a.platformName.localeCompare(b.platformName);
+      if (sort === 'price') {
+        // 按输入价排序；未收录的排最后
+        const av = a.pricing.input ?? Number.POSITIVE_INFINITY;
+        const bv = b.pricing.input ?? Number.POSITIVE_INFINITY;
+        return av - bv;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return sorted;
+  }, [models, filter, sort]);
 
-  if (!configured) {
+  if (!configured && !loading) {
     return (
       <div className="lb-enter flex h-full min-h-[calc(100vh-9em)] items-center justify-center p-[var(--pad-page)]">
         <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)" className="w-full">
           <EmptyBlock
             title="还没有模型数据"
-            desc="配置 Key 后可读取各厂商的可用模型；按模型的用量与成本需要用量接口或聚合网关才能拿到。"
+            desc="配置 Key 后，这里会显示厂商 /models 接口真实返回的可用模型清单。"
             height="16em"
             action={
               <a
@@ -926,9 +861,9 @@ function ModelsPage() {
         <div className="p-[var(--pad-card)]">
           <div className="mb-[var(--sp-3)] flex flex-wrap items-center gap-[var(--sp-2)]">
             <div className="min-w-0 flex-1">
-              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">模型排行榜</h2>
+              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">可用模型</h2>
               <p className="text-[0.78em] text-[var(--text-faint)]">
-                点击表头排序 · 共 {items.length} 个模型
+                {loading ? '正在读取…' : `共 ${items.length} 个 · 来自厂商 /models 接口`}
               </p>
             </div>
             <div className="flex flex-wrap gap-[var(--sp-1)]">
@@ -943,7 +878,7 @@ function ModelsPage() {
               >
                 全部
               </button>
-              {PLATFORMS.map((p) => (
+              {platforms.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => setFilter(p.id)}
@@ -960,7 +895,15 @@ function ModelsPage() {
               ))}
             </div>
           </div>
-          <ModelTable items={items} sort={sort} onSort={setSort} />
+          {items.length === 0 ? (
+            <EmptyBlock
+              title="没有拉到模型"
+              desc="厂商返回的模型列表为空，或所有厂商连接均失败。可到「模型厂商」页重新测试连接。"
+              height="12em"
+            />
+          ) : (
+            <ModelTable items={items} sort={sort} onSort={setSort} />
+          )}
         </div>
       </LiquidGlass>
     </div>
@@ -970,24 +913,16 @@ function ModelsPage() {
 /* ============================================================ 趋势页 */
 
 function TrendPage() {
-  const configured = Object.keys(loadKeys()).length > 0;
-  const [range, setRange] = useState<'7' | '14' | '30'>('30');
-  const days = Number(range);
-  const series = PLATFORMS.map((p) => ({
-    id: p.id,
-    name: p.name,
-    color: p.color,
-    values: p.series.slice(-days),
-  }));
-  const dates = dailyTotals().slice(-days).map((d) => d.date);
+  const { platforms, loading } = useLive();
+  const configured = platforms.length > 0;
 
-  if (!configured) {
+  if (!configured && !loading) {
     return (
       <div className="lb-enter flex h-full min-h-[calc(100vh-9em)] items-center justify-center p-[var(--pad-page)]">
         <LiquidGlass radius={10} bezel={24} strength={14} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)" className="w-full">
           <EmptyBlock
             title="还没有用量记录"
-            desc="累计用量需要一个能查询历史的数据源。多数厂商只给当前余额，逐日曲线需要接入 OpenRouter 这类聚合网关，或本地代理记账。"
+            desc="配置 Key 后仍需接入用量接口，才能画出逐日曲线。"
             height="18em"
             action={
               <a
@@ -1008,41 +943,39 @@ function TrendPage() {
     <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
       <LiquidGlass radius={10} bezel={24} strength={14} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
         <div className="p-[var(--pad-card)]">
-          <div className="mb-[var(--sp-3)] flex flex-wrap items-center gap-[var(--sp-2)]">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">用量趋势</h2>
-              <p className="text-[0.78em] text-[var(--text-faint)]">各平台逐日 token 消耗</p>
-            </div>
-            <Segmented<'7' | '14' | '30'>
-              value={range}
-              onChange={setRange}
-              options={[
-                { value: '7', label: '7天' },
-                { value: '14', label: '14天' },
-                { value: '30', label: '30天' },
-              ]}
-            />
-          </div>
-          <StackedAreaChart series={series} dates={dates} height={300} />
+          <h2 className="mb-[0.15em] text-[0.98em] font-medium text-[var(--text-primary)]">用量趋势</h2>
+          <p className="mb-[var(--sp-3)] text-[0.78em] text-[var(--text-faint)]">逐日 token 消耗 · 尚未接入</p>
+          <EmptyBlock
+            title="没有可用数据"
+            desc="这一页需要厂商的用量或账单接口。当前已接入的只有模型清单与余额，无法推出历史消耗，所以保持空白而不是绘制估算曲线。"
+            height="18em"
+          />
         </div>
       </LiquidGlass>
 
-      <div className="grid gap-[var(--gap-grid)] md:grid-cols-2 xl:grid-cols-3">
-        {PLATFORMS.map((p) => (
-          <LiquidGlass key={p.id} radius={9} bezel={20} strength={10} blur={9} tint="rgba(255,255,255,0.38)" tintDark="rgba(26,30,38,0.42)">
-            <div className="p-[var(--pad-card)]">
-              <div className="mb-[0.5em] flex items-center gap-[var(--sp-1)]">
-                <span className="h-[0.55em] w-[0.55em] rounded-full" style={{ background: p.color }} />
-                <span className="text-[0.88em] font-medium text-[var(--text-primary)]">{p.name}</span>
-                <span className="ml-auto text-[0.76em] tabular-nums text-[var(--text-muted)]">
-                  {fmtTokens(p.monthTokens)}
-                </span>
+      {/* 已连接厂商的当前状态仍然是真的，列在这里供对照 */}
+      {configured && (
+        <div className="grid gap-[var(--gap-grid)] md:grid-cols-2 xl:grid-cols-3">
+          {platforms.map((p) => (
+            <LiquidGlass key={p.id} radius={9} bezel={20} strength={10} blur={9} tint="rgba(255,255,255,0.38)" tintDark="rgba(26,30,38,0.42)">
+              <div className="p-[var(--pad-card)]">
+                <div className="mb-[0.5em] flex items-baseline gap-[var(--sp-1)]">
+                  <span className="h-[0.55em] w-[0.55em] shrink-0 self-center rounded-full" style={{ background: p.color }} />
+                  <span className="truncate text-[0.88em] font-medium text-[var(--text-primary)]">{p.name}</span>
+                  <span className="ml-auto shrink-0 text-[0.76em] tabular-nums text-[var(--text-muted)]">
+                    {p.modelCount !== null ? `${p.modelCount} 模型` : '—'}
+                  </span>
+                </div>
+                <p className="text-[0.74em] leading-relaxed text-[var(--text-faint)]">
+                  {p.status === 'ok'
+                    ? '连接正常；该厂商未提供逐日用量接口。'
+                    : p.message ?? '连接异常'}
+                </p>
               </div>
-              <Sparkline values={p.series} color={p.color} width={220} height={44} />
-            </div>
-          </LiquidGlass>
-        ))}
-      </div>
+            </LiquidGlass>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1107,8 +1040,14 @@ function Shell() {
 export default function App() {
   return (
     <ThemeProvider>
+      {/*
+       * LiveProvider 必须在 RefreshProvider 内层：
+       * 它订阅自动刷新的 lastAt，刷新时重新请求真实接口。
+       */}
       <RefreshProvider>
-        <Shell />
+        <LiveProvider>
+          <Shell />
+        </LiveProvider>
       </RefreshProvider>
     </ThemeProvider>
   );

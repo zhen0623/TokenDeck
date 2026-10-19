@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { fmtTokens, fmtDate } from './data';
+import { fmtTokens, fmtDate } from './live';
 
 /* ============================================================================
    手写 SVG 图表 —— 不引入图表库，保持产物轻量
