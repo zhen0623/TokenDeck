@@ -11,8 +11,8 @@ android {
         applicationId "com.darius.tokendeck"
         minSdk 24
         targetSdk 34
-        versionCode 28
-        versionName "0.9.4"
+        versionCode 31
+        versionName "0.9.7"
         vectorDrawables.useSupportLibrary = true
     }
 

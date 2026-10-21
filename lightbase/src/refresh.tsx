@@ -11,12 +11,15 @@ import {
 /* ============================================================================
  * 自动刷新
  * ----------------------------------------------------------------------------
- * 用户要求把「点一下刷新」改成可配置的自动刷新。
- * 这里刻意做成「真的重新读一遍数据源」，而不是只转 900ms 动画——
+ * 两种触发方式：
+ *   1. 定时器：按设置的间隔自动重新读一遍数据源
+ *   2. 下拉：在任意页面从顶部往下拉即刷新（移动端最常见的手势）
+ *
+ * 刻意做成「真的重新读一遍数据源」，而不是只转 900ms 动画——
  * 假转圈会让人以为数据更新了，实际什么都没变。
  *
- * 注意：多标签页 / 多窗口同时开时，每个实例各跑一个定时器即可，
- * 不做跨页同步（收益小、复杂度高）。
+ * 顶部不再显示倒计时：每秒重渲染整棵树只为跳一个数字，代价和收益不成比例，
+ * 且倒计时本身不提供任何可操作信息。需要知道"上次什么时候刷的"看设置页。
  * ========================================================================== */
 
 const KEY_INTERVAL = 'lb-auto-refresh';
@@ -46,14 +49,12 @@ interface RefreshState {
   /** 分钟；0 = 关闭 */
   interval: number;
   setInterval: (v: number) => void;
-  /** 最近一次刷新完成的时间戳 */
+  /** 最近一次刷新触发的时间戳 */
   lastAt: number;
-  /** 正在刷新 */
+  /** 正在刷新（含下拉触发的短反馈窗口） */
   refreshing: boolean;
-  /** 手动触发一次 */
+  /** 手动 / 下拉触发一次 */
   refresh: () => void;
-  /** 距离下次自动刷新的秒数；未启用为 null */
-  countdown: number | null;
 }
 
 const Ctx = createContext<RefreshState | null>(null);
@@ -62,17 +63,19 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
   const [interval, setIntervalState] = useState<number>(() => readInterval());
   const [lastAt, setLastAt] = useState<number>(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
   const timer = useRef<number>(0);
-  const tick = useRef<number>(0);
+  const spin = useRef<number>(0);
 
   const refresh = useCallback(() => {
+    /*
+     * 先推进 lastAt 让 LiveProvider 立刻重新请求，
+     * 再用 900ms 的 refreshing 窗口撑住指示器 —— 否则用户在数据回来之前
+     * 看不到任何反馈，会以为手势没生效。
+     */
     setRefreshing(true);
-    // 真正重新挂载数据视图靠调用方消费 lastAt；这里只负责节流与状态
-    window.setTimeout(() => {
-      setLastAt(Date.now());
-      setRefreshing(false);
-    }, 600);
+    setLastAt(Date.now());
+    window.clearTimeout(spin.current);
+    spin.current = window.setTimeout(() => setRefreshing(false), 900);
   }, []);
 
   const setIntervalValue = useCallback((v: number) => {
@@ -84,40 +87,17 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // 定时器 + 倒计时
   useEffect(() => {
     window.clearInterval(timer.current);
-    window.clearInterval(tick.current);
-
-    if (interval <= 0) {
-      setCountdown(null);
-      return;
-    }
-
-    const total = interval * 60_000;
-    let remaining = Math.round(total / 1000);
-    setCountdown(remaining);
-
-    tick.current = window.setInterval(() => {
-      remaining = remaining <= 1 ? Math.round(total / 1000) : remaining - 1;
-      setCountdown(remaining);
-    }, 1000);
-
-    timer.current = window.setInterval(() => {
-      refresh();
-      remaining = Math.round(total / 1000);
-    }, total);
-
-    return () => {
-      window.clearInterval(timer.current);
-      window.clearInterval(tick.current);
-    };
+    if (interval <= 0) return;
+    timer.current = window.setInterval(refresh, interval * 60_000);
+    return () => window.clearInterval(timer.current);
   }, [interval, refresh]);
 
+  useEffect(() => () => window.clearTimeout(spin.current), []);
+
   return (
-    <Ctx.Provider
-      value={{ interval, setInterval: setIntervalValue, lastAt, refreshing, refresh, countdown }}
-    >
+    <Ctx.Provider value={{ interval, setInterval: setIntervalValue, lastAt, refreshing, refresh }}>
       {children}
     </Ctx.Provider>
   );
@@ -127,12 +107,4 @@ export function useRefresh(): RefreshState {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error('useRefresh 必须在 RefreshProvider 内使用');
   return ctx;
-}
-
-/** 把剩余秒数格式化成 mm:ss */
-export function fmtCountdown(sec: number | null): string {
-  if (sec === null) return '';
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }

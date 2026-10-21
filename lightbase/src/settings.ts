@@ -32,6 +32,27 @@ export interface ProviderSpec {
     /** 从返回 JSON 里取金额与币种 */
     pick: (json: Record<string, unknown>) => { amount: number; currency: string } | null;
   };
+  /**
+   * 用量查询。
+   *
+   * 只对「实测确有此路由」的厂商声明 —— 判定方式是拿一个随手编的兄弟路径做对照：
+   *   对照 404 + 候选 401/200 → 路由真实存在
+   *   两者返回一致       → 鉴权在路由前执行，存在性无法证实，不能写进来
+   *
+   * 实测结论（2026-10）：
+   *   GLM /api/paas/v4 下所有 /usage 变体均 404，与伪造路径相同 → 无用量接口
+   *   MiMo /v1 下同上 → 无用量接口
+   *   OpenRouter /api/v1/credits → 401（伪造路径 404）→ 真实存在
+   */
+  usage?: {
+    path: string;
+    /** 从返回 JSON 取用量与单位 */
+    pick: (json: Record<string, unknown>) => {
+      value: number;
+      unit: 'tokens' | 'credits';
+      currency?: 'USD' | 'CNY';
+    } | null;
+  };
   /** 展示用备注 */
   note?: string;
   /** 用户自定义添加 */
@@ -69,6 +90,14 @@ const pickOpenRouter = (json: Record<string, unknown>) => {
   if (Number.isFinite(total)) {
     return { amount: total - (Number.isFinite(used) ? used : 0), currency: 'USD' };
   }
+  return null;
+};
+
+/** OpenRouter：{ data: { total_credits, total_usage } } → 已用金额 */
+const pickOpenRouterUsage = (json: Record<string, unknown>) => {
+  const d = asObj(asObj(json).data);
+  const used = Number(d.total_usage ?? NaN);
+  if (Number.isFinite(used)) return { value: used, unit: 'credits' as const, currency: 'USD' as const };
   return null;
 };
 
@@ -287,6 +316,7 @@ export const PROVIDERS: ProviderSpec[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     auth: 'bearer',
     balance: { path: '/credits', pick: pickOpenRouter },
+    usage: { path: '/credits', pick: pickOpenRouterUsage },
     note: '一个 Key 通吃数百模型，且有完整用量接口',
   },
   {
@@ -377,6 +407,16 @@ export function balanceRequest(spec: ProviderSpec, key: string) {
     url: withQuery(`${spec.baseUrl}${spec.balance.path}`, key, spec.auth),
     headers: buildHeaders(spec, key),
     pick: spec.balance.pick,
+  };
+}
+
+/** 用量请求（仅显式声明了 usage 的厂商） */
+export function usageRequest(spec: ProviderSpec, key: string) {
+  if (!spec.usage) return null;
+  return {
+    url: withQuery(`${spec.baseUrl}${spec.usage.path}`, key, spec.auth),
+    headers: buildHeaders(spec, key),
+    pick: spec.usage.pick,
   };
 }
 

@@ -14,7 +14,7 @@ import { Section, Field } from './settings-ui';
 import { detectGlassTier } from './liquid-glass';
 import { APP_VERSION } from './version';
 import { hasNativeBridge, saveTextFile, pickTextFile } from './native';
-import { useRefresh, REFRESH_OPTIONS, fmtCountdown } from './refresh';
+import { useRefresh, REFRESH_OPTIONS } from './refresh';
 import {
   buildConfig,
   configFileName,
@@ -31,7 +31,7 @@ type IoState =
 
 export function SystemSettingsPage() {
   const { theme, setTheme, glassMode, setGlassMode, fontScale, setFontScale } = useTheme();
-  const { interval, setInterval: setIntervalValue, countdown, lastAt } = useRefresh();
+  const { interval, setInterval: setIntervalValue, lastAt, refresh } = useRefresh();
   const tier = detectGlassTier();
 
   const [includeKeys, setIncludeKeys] = useState(true);
@@ -129,11 +129,12 @@ export function SystemSettingsPage() {
         title="自动刷新"
         desc="按固定间隔重新读取数据，避免看到过期数字。"
         right={
-          interval > 0 && countdown !== null ? (
-            <span className="shrink-0 text-[0.76em] tabular-nums text-[var(--text-faint)]">
-              {fmtCountdown(countdown)} 后
-            </span>
-          ) : undefined
+          <button
+            onClick={refresh}
+            className="shrink-0 rounded-[var(--radius-btn)] px-[var(--sp-2)] py-[0.24em] text-[0.76em] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            立即刷新
+          </button>
         }
       >
         <div className="flex flex-wrap gap-[var(--sp-1)]">
@@ -154,8 +155,8 @@ export function SystemSettingsPage() {
         </div>
         <p className="mt-[var(--sp-2)] text-[0.76em] leading-relaxed text-[var(--text-faint)]">
           {interval > 0
-            ? `每 ${interval} 分钟自动刷新一次，顶部标题旁显示倒计时。`
-            : '已关闭自动刷新，只能手动点右上角刷新。'}
+            ? `每 ${interval} 分钟自动刷新一次；也可以在任意页面从顶部往下拉手动刷新。`
+            : '已关闭定时刷新，仍可下拉或点头部刷新图标手动刷新。'}
           <span className="ml-[0.4em]">
             上次刷新 {new Date(lastAt).toLocaleTimeString('zh-CN', { hour12: false })}
           </span>

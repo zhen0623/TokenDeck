@@ -29,6 +29,7 @@ import {
   balanceRequest,
   loadKeys,
   modelsRequest,
+  usageRequest,
 } from './settings';
 import { priceOf, type ModelPricing } from './pricing';
 import { useRefresh } from './refresh';
@@ -60,6 +61,22 @@ export function fmtDate(ts: number): string {
 
 /* ---------------------------------------------------------------- 类型 */
 
+/**
+ * 真实用量。
+ *
+ * 单位只有两种可能，且绝不混算：
+ *   tokens  —— 厂商真给了 token 数
+ *   credits —— 厂商只给金额账单（如 OpenRouter 的 total_usage）
+ *
+ * 拿不到就是 null。实测 GLM / MiMo 的 /usage 系列全部 404，
+ * 与随手编的路径返回一致 —— 厂商没这个接口，不能靠 Key 反推。
+ */
+export interface UsageFigure {
+  value: number;
+  unit: 'tokens' | 'credits';
+  currency?: 'USD' | 'CNY';
+}
+
 /** 一个已配置厂商的实时状态 */
 export interface LivePlatform {
   id: string;
@@ -74,6 +91,10 @@ export interface LivePlatform {
   balanceSupported: boolean;
   /** 可用模型数；请求失败为 null */
   modelCount: number | null;
+  /** 真实用量；厂商无用量接口或调用失败为 null */
+  usage: UsageFigure | null;
+  /** 该厂商是否声明了用量接口 */
+  usageSupported: boolean;
   /** 连接状态 */
   status: 'ok' | 'auth' | 'error';
   /** 状态说明（失败原因） */
@@ -182,6 +203,8 @@ export async function fetchLiveData(): Promise<Omit<LiveData, 'loading'>> {
         currency: 'USD',
         balanceSupported: !!spec.balance,
         modelCount: null,
+        usage: null,
+        usageSupported: !!spec.usage,
         status: 'ok',
       };
 
@@ -196,6 +219,20 @@ export async function fetchLiveData(): Promise<Omit<LiveData, 'loading'>> {
               platform.balance = picked.amount;
               platform.currency = picked.currency === 'CNY' ? 'CNY' : 'USD';
             }
+          } catch {
+            /* 结构不符就留 null，不要编 */
+          }
+        }
+      }
+
+      // --- 用量（只有极少数厂商开放）---
+      const ur = usageRequest(spec, key);
+      if (ur) {
+        const uRes = await httpRequest(ur.url, { headers: ur.headers });
+        if (uRes.ok && !looksHtml(uRes.body)) {
+          try {
+            const picked = ur.pick(JSON.parse(uRes.body) as Record<string, unknown>);
+            if (picked) platform.usage = picked;
           } catch {
             /* 结构不符就留 null，不要编 */
           }

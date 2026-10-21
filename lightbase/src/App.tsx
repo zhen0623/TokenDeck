@@ -1,27 +1,26 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Wallet,
   Coins,
   TrendingUp,
-  TrendingDown,
   Activity,
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
   ArrowUpRight,
+  ChevronDown,
   Zap,
-  CircleDollarSign,
   Settings,
   KeyRound,
 } from 'lucide-react';
 import { ThemeProvider } from './theme';
-import { RefreshProvider, useRefresh, fmtCountdown } from './refresh';
+import { RefreshProvider, useRefresh } from './refresh';
+import { usePullToRefresh, PullIndicator } from './pull-refresh';
 import { LiquidGlass } from './liquid-glass';
 import { Segmented, Badge, cx } from './ui';
 import { SystemSettingsPage } from './SystemSettingsPage';
 import { ProvidersPage } from './ProvidersPage';
-import { EmptyBlock, StatSkeleton } from './empty';
-import { BillingDetail } from './BillingDetail';
+import { EmptyBlock } from './empty';
 import { APP_VERSION } from './version';
 import { loadKeys } from './settings';
 import {
@@ -35,87 +34,20 @@ import {
 } from './live';
 import { compactPrice } from './pricing';
 
-/* ============================================================ 顶部指标卡 */
-
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-  delta,
-  accent = 'var(--brand-green)',
-  progress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
-  delta?: number;
-  accent?: string;
-  progress?: number;
-}) {
-  const up = (delta ?? 0) >= 0;
-  return (
-    <LiquidGlass radius={10} bezel={24} strength={14} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-      {/*
-       * 横向两行：第一行 图标+标签 … 右侧数值；第二行 说明（缩进）+ 可选进度条。
-       * 原来是纵向四段（图标行 / 数值行 / 说明行 / 进度条），手机单卡 102.7px。
-       * 改成横向后约 47px —— 正好是原来的一半。
-       * 数值必须 shrink-0 且不换行：三卡并排时宽度由 StatGrid 决定，
-       * 让数值参与换行会把卡片重新撑高，等于白改。
-       */}
-      <div className="px-[var(--pad-card)] py-[0.5em]">
-        <div className="flex items-center gap-[0.5em]">
-          <span
-            className="flex h-[1.5em] w-[1.5em] shrink-0 items-center justify-center rounded-[0.45em]"
-            style={{ background: `${accent}1f`, color: accent }}
-          >
-            {icon}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[0.8em] text-[var(--text-muted)]">
-            {label}
-          </span>
-          <span className="shrink-0 whitespace-nowrap text-[1.1em] font-semibold leading-none tabular-nums text-[var(--text-primary)]">
-            {value}
-          </span>
-          {delta !== undefined && (
-            <span
-              className={cx(
-                'inline-flex shrink-0 items-center gap-[0.2em] rounded-[0.35em] px-[0.3em] py-[0.1em] text-[0.68em] font-medium',
-                up
-                  ? 'bg-[rgb(250_81_81_/_0.12)] text-[var(--color-danger)]'
-                  : 'bg-[var(--brand-green-10)] text-[var(--brand-green-text)]',
-              )}
-            >
-              {up ? <TrendingUp size="0.8em" /> : <TrendingDown size="0.8em" />}
-              {fmtDelta(delta)}
-            </span>
-          )}
-        </div>
-
-        <div className="mt-[0.15em] flex items-center gap-[0.5em] pl-[2em]">
-          {sub && (
-            <span className="min-w-0 flex-1 truncate text-[0.68em] text-[var(--text-faint)]">
-              {sub}
-            </span>
-          )}
-          {progress !== undefined && (
-            <div className="ml-auto h-[4px] w-[3.2em] shrink-0 overflow-hidden rounded-full bg-[var(--bg-track)]">
-              <div
-                className="h-full rounded-full transition-[width] duration-500"
-                style={{ width: `${Math.min(100, progress)}%`, background: accent }}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    </LiquidGlass>
-  );
-}
-
 /* ============================================================ 平台卡片 */
 
-function PlatformCard({ p }: { p: LivePlatform }) {
+function PlatformCard({
+  p,
+  models,
+  open,
+  onToggle,
+}: {
+  p: LivePlatform;
+  /** 该厂商的模型清单，来自厂商 /models 接口 */
+  models: LiveModel[];
+  open: boolean;
+  onToggle: () => void;
+}) {
   const statusMap = {
     ok: { tone: 'success' as const, text: '连接正常', icon: CheckCircle2 },
     auth: { tone: 'danger' as const, text: 'Key 无效', icon: AlertTriangle },
@@ -178,165 +110,66 @@ function PlatformCard({ p }: { p: LivePlatform }) {
             {p.message}
           </div>
         )}
+
+        {/*
+         * 展开区：点击卡片头部展开该厂商的全部可用模型。
+         * 模型清单本来就在 /models 的返回里，合并进平台页之后
+         * 不再需要单独的「模型排行」页面 —— 多一个一级导航只为了展示
+         * 同一批数据，反而让用户要在两处对照。
+         */}
+        <button
+          onClick={onToggle}
+          aria-expanded={open}
+          className="mt-[var(--sp-3)] flex w-full items-center gap-[var(--sp-1)] border-t border-[var(--border-muted)] pt-[var(--sp-2)] text-[0.8em] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+        >
+          <span>{open ? '收起模型' : '查看可用模型'}</span>
+          <ChevronDown
+            size="0.95em"
+            className={cx('ml-auto transition-transform duration-200', open && 'rotate-180')}
+          />
+        </button>
+
+        {open && (
+          <div className="mt-[var(--sp-2)]">
+            {models.length === 0 ? (
+              <p className="px-[var(--sp-1)] py-[var(--sp-1)] text-[0.74em] text-[var(--text-faint)]">
+                {p.status === 'ok' ? '该厂商返回的模型列表为空' : '连接失败，无法读取模型清单'}
+              </p>
+            ) : (
+              <ul className="max-h-[16em] space-y-[0.15em] overflow-y-auto lb-scroll">
+                {models.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex items-baseline gap-[var(--sp-1)] rounded-[var(--radius-sm)] px-[var(--sp-1)] py-[0.28em] hover:bg-[var(--bg-hover)]"
+                  >
+                    <span
+                      className="mt-[0.45em] h-[0.42em] w-[0.42em] shrink-0 self-start rounded-full"
+                      style={{ background: m.color }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[0.8em] text-[var(--text-primary)]">{m.name}</div>
+                      {m.name !== m.id && (
+                        <div className="truncate text-[0.7em] text-[var(--text-faint)]">{m.id}</div>
+                      )}
+                    </div>
+                    <span className="shrink-0 whitespace-nowrap text-[0.72em] tabular-nums text-[var(--text-secondary)]">
+                      {compactPrice(m.pricing)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </LiquidGlass>
   );
 }
 
-/* ============================================================ 模型排行 */
-
-type SortKey = 'name' | 'price' | 'provider';
-
-function ModelTable({ items, sort, onSort }: {
-  items: LiveModel[];
-  sort: SortKey;
-  onSort: (k: SortKey) => void;
-}) {
-  const [openId, setOpenId] = useState<string | null>(null);
-  const cols: Array<{ key: SortKey; label: string; className?: string }> = [
-    { key: 'name', label: '模型' },
-    { key: 'provider', label: '厂商', className: 'hidden sm:table-cell' },
-    { key: 'price', label: '单价 / 百万' },
-  ];
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[0.86em]">
-        <thead>
-          <tr className="border-b border-[var(--border-color)]">
-            <th className="w-[2.2em] pb-[0.6em] text-left font-medium text-[var(--text-faint)]">#</th>
-            {cols.map((c) => (
-              <th
-                key={c.key}
-                onClick={() => onSort(c.key)}
-                className={cx(
-                  'cursor-pointer select-none pb-[0.6em] font-medium transition-colors duration-150',
-                  c.key === 'price' ? 'text-right' : 'text-left',
-                  c.className,
-                  sort === c.key
-                    ? 'text-[var(--brand-green-text)]'
-                    : 'text-[var(--text-faint)] hover:text-[var(--text-secondary)]',
-                )}
-              >
-                {c.label}
-                {sort === c.key && <span className="ml-[0.2em]">↓</span>}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((m, i) => (
-            <Fragment key={`${m.platformId}:${m.id}`}>
-              <tr
-                onClick={() => setOpenId(openId === `${m.platformId}:${m.id}` ? null : `${m.platformId}:${m.id}`)}
-                className={cx(
-                  'cursor-pointer border-b border-[var(--border-muted)] transition-colors duration-150 hover:bg-[var(--bg-hover)]',
-                  openId === `${m.platformId}:${m.id}` && 'bg-[var(--bg-hover)]',
-                )}
-              >
-                <td className="align-top py-[var(--sp-2)]">
-                  <span
-                    className={cx(
-                      'tabular-nums',
-                      i < 3 ? 'font-semibold text-[var(--brand-green-text)]' : 'text-[var(--text-faint)]',
-                    )}
-                  >
-                    {i + 1}
-                  </span>
-                </td>
-                <td className="align-top py-[var(--sp-2)] pr-[0.8em]">
-                  <div className="flex items-center gap-[var(--sp-1)]">
-                    <span
-                      /*
-                       * 圆点对齐「模型名首行」中心，不是两行整体中心。
-                       * items-center 会按两行居中，实测低 7.4px，看着掉到副行。
-                       */
-                      className="mt-[0.5em] h-[0.5em] w-[0.5em] shrink-0 self-start rounded-full"
-                      style={{ background: m.color }}
-                    />
-                    <div className="min-w-0">
-                      <div className="truncate font-medium text-[var(--text-primary)]">{m.name}</div>
-                      <div className="truncate text-[0.78em] text-[var(--text-faint)]">{m.id}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="hidden align-top py-[var(--sp-2)] pr-[0.8em] sm:table-cell">
-                  <span className="truncate text-[0.82em] text-[var(--text-muted)]">{m.platformName}</span>
-                </td>
-                {/*
-                 * 单价来自内置参考表（pricing.ts），不是厂商实时返回。
-                 * 用 compactPrice 统一格式，未收录的显示「未收录」而不是 0。
-                 * whitespace-nowrap：320px 下金额会被拆成三行。
-                 */}
-                {/*
-                 * 单价是「参考价」而非实时账单：聚合网关的 /models 可能带真实单价，
-                 * 但在能确认来源之前，不把它当成帐户实际扣费。
-                 */}
-                <td className="whitespace-nowrap align-top py-[var(--sp-2)] pl-[0.4em] text-right text-[0.82em] tabular-nums text-[var(--text-secondary)]">
-                  {compactPrice(m.pricing)}
-                </td>
-              </tr>
-              {openId === `${m.platformId}:${m.id}` && (
-                <tr className="border-b border-[var(--border-muted)]">
-                  <td colSpan={4} className="pb-[var(--sp-3)] pt-[var(--sp-1)]">
-                    <BillingDetail
-                      modelId={m.id}
-                      providerId={m.platformId}
-                      providerName={m.platformName}
-                    />
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 /* ============================================================ 顶栏 */
 
-/**
- * 指标卡容器。
- *
- * 三张卡只在「够宽」时同排，否则一律纵向 —— 绝不出现 2+1。
- * 用 auto-fit 会得到 [2,1] 这种半吊子排列：右边空一格，看起来像漏了一个。
- * 所以这里实测可用宽度，只有放得下三张等宽卡才切三列。
- */
-function StatGrid({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [cols, setCols] = useState<1 | 3>(3);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // 单卡最小可读宽度 + 卡片间距；不足就纵排
-    const MIN_CARD = 170;
-    const GAP = 12;
-    const measure = () => {
-      const w = el.clientWidth;
-      setCols(w >= MIN_CARD * 3 + GAP * 2 ? 3 : 1);
-    };
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    measure();
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className="grid gap-[var(--gap-grid)]"
-      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-    >
-      {children}
-    </div>
-  );
-}
-
 function TopBar() {
-  const { refreshing, interval, countdown } = useRefresh();
+  const { refreshing } = useRefresh();
   const { platforms, models, loading } = useLive();
   const configured = platforms.length > 0;
 
@@ -363,32 +196,22 @@ function TopBar() {
         {/*
          * 副标题只写真实数量。原来写死「5 个平台 · 12 个模型 · 近 30 天」，
          * 那是假数据的长度；现在按实际拉到的数据算，没配 Key 就直说。
+         *
+         * 倒计时已移除：每秒重渲染整棵树只为跳一个数字，收益不成立。
          */}
-        <p className="hidden truncate text-[0.76em] text-[var(--text-muted)] sm:block">
+        <p className="truncate text-[0.76em] text-[var(--text-muted)]">
           {loading
             ? '正在读取…'
             : configured
               ? `${platforms.length} 个厂商 · ${models.length} 个模型`
               : '未配置 Key · 不显示任何数据'}
-          {interval > 0 && countdown !== null && (
-            <span className="ml-[0.6em] text-[var(--text-faint)]">
-              自动刷新 {fmtCountdown(countdown)}
-            </span>
-          )}
-        </p>
-        {/* 手机上副标题是隐藏的，倒计时单独给一个可见的小徽标 */}
-        <p className="flex items-center gap-[0.3em] text-[0.72em] text-[var(--text-faint)] sm:hidden">
-          {interval > 0 && countdown !== null ? (
-            <>
-              <RefreshCw size="0.75em" className={refreshing ? 'animate-spin' : ''} />
-              <span className="tabular-nums">{fmtCountdown(countdown)}</span>
-            </>
-          ) : (
-            <span>{refreshing ? '刷新中…' : '自动刷新已关闭'}</span>
-          )}
         </p>
       </div>
 
+      {/* 只有「正在刷新」时给一个指示，静止时不占位 */}
+      {refreshing && (
+        <RefreshCw size="1em" className="shrink-0 animate-spin text-[var(--text-faint)]" />
+      )}
     </LiquidGlass>
   );
 }
@@ -397,13 +220,12 @@ function TopBar() {
 
 /**
  * 导航项。
- * label 用于侧栏/无障碍名称，short 用于底部 dock（6 项等分，390px 下每项约 65px，
+ * label 用于侧栏/无障碍名称，short 用于底部 dock（5 项等分，390px 下每项约 64px，
  * 三个字就会挤成两行，所以 dock 统一用两个字）。
  */
 const NAV = [
   { id: 'overview', label: '总览', short: '总览', icon: Activity },
-  { id: 'platforms', label: '平台', short: '平台', icon: Wallet },
-  { id: 'models', label: '模型排行', short: '模型', icon: Coins },
+  { id: 'platforms', label: '平台与模型', short: '平台', icon: Wallet },
   { id: 'trend', label: '用量趋势', short: '趋势', icon: TrendingUp },
   { id: 'providers', label: '模型厂商', short: '厂商', icon: KeyRound },
   { id: 'appearance', label: '系统设置', short: '设置', icon: Settings },
@@ -521,7 +343,7 @@ function Sidebar({ active, onSelect }: { active: string; onSelect: (id: string) 
  * 而且抽屉会盖住内容。移动端惯例是把一级导航常驻在拇指可达的底部。
  *
  * 两条硬约束：
- *   1. 6 项等分，390px 下每项约 65px —— 文字只能两个字，否则换行撑高。
+ *   1. 5 项等分，390px 下每项约 64px —— 文字只能两个字，否则换行撑高。
  *   2. 内容区必须让出 dock 高度，否则最后一屏被遮住；
  *      高度含 safe-area-inset-bottom（iPhone/全面屏手势条），在 Shell 里用
  *      CSS 变量 --dock-h 统一算，避免两处各写一个魔法数字。
@@ -540,22 +362,27 @@ function BottomDock({ active, onSelect }: { active: string; onSelect: (id: strin
       blur={14}
       tint="rgba(255,255,255,0.52)"
       tintDark="rgba(20,24,31,0.58)"
-      /* 宽度策略：手机贴边 2px，平板收到 30em 上限并居中。
+      /* 宽度策略：先按「项数比例」收窄，再给大屏上限并居中。
          两个数字都必须有，缺一个就会在另一类设备上出问题：
 
          ① 只用百分比（历史 bug）：w-[55%] 在 390 屏下仅 215px，
-            每项 33px，而胶囊本身 32.7px —— 胶囊顶满格子，图标文字被挤出变形。
+         每项 33px，而胶囊本身 32.7px —— 胶囊顶满格子，图标文字被挤出变形。
 
          ② 只贴边不给上限（也是 bug）：744px 的平板竖屏仍走手机布局
-            （md 断点 768），dock 被撑到 740px，每项 123px，
-            图标散得太开，读起来是一条通栏而不是悬浮胶囊。
+         （md 断点 768），dock 被撑到 740px，每项 123px，
+         图标散得太开，读起来是一条通栏而不是悬浮胶囊。
 
-         现在：width = min(视口 - 4px, 30em)，居中。
-           320 → 316（每项 52.7）   390 → 386（64.3）   744 → 420（70）
-         两边 2px 在手机上满足"贴边"观感，30em 上限保证大屏不散架。
+         现在：width = min(视口 × 5/6, 25em)，居中。用 vw 而不是 calc(100%-4px)
+         是因为 Tailwind 的任意值里 `100%-4px` 这种无空格算式不是合法 CSS，
+         编译出来整条 width 会被丢弃，dock 直接塌成内容宽。
+         导航从 6 项减到 5 项后，若仍占满宽度，每项会从 64px 撑到 77px：
+         图标间距被拉大，读起来像横跨屏幕的一条而不是胶囊。
+         乘 5/6 让每项宽度回到减项前的 64px 左右，视觉密度不变。
+           320 → 263（每项 52.6）   390 → 321（64.2）   744 → 350（70）
+         两边留白在手机上满足“成胶囊”的观感，25em 上限保证大屏不散架。
          竖向 py 固定 7.8px（不用 em）：字号档位变化时高度不该跟着涨，
          否则大字号下 dock 会变胖、遮住更多内容。 */
-      className="lb-dock fixed bottom-[max(0.5em,env(safe-area-inset-bottom,0px))] left-1/2 w-[calc(100%-4px)] max-w-[30em] -translate-x-1/2 flex items-stretch rounded-full py-[7.8px] md:hidden"
+      className="lb-dock fixed bottom-[max(0.5em,env(safe-area-inset-bottom,0px))] left-1/2 w-[83.33vw] max-w-[25em] -translate-x-1/2 flex items-stretch rounded-full py-[7.8px] md:hidden"
       aria-label="主导航"
     >
       {NAV.map((n) => {
@@ -576,7 +403,7 @@ function BottomDock({ active, onSelect }: { active: string; onSelect: (id: strin
               选中态：胶囊把「图标 + 文字」整体包住，而不是只垫在图标背后。
               之前那块绿色只是图标底下的小方块，等于在 dock 里又开一层卡片，
               层级过多就是违和感的来源。整体成胶囊后，一个导航项只读作一个整体。
-              圆角用 999px（真胶囊），因为 6 项等分后每项仅约 61px 宽，
+              圆角用 999px（真胶囊），因为 5 项等分后每项仅约 64px 宽，
               固定圆角在窄项上会退化成方块。
             */}
             <span
@@ -605,30 +432,8 @@ function BottomDock({ active, onSelect }: { active: string; onSelect: (id: strin
 /* ============================================================ 总览 */
 
 function Overview() {
-  const { platforms, models, loading } = useLive();
-  const sum = summarize(platforms);
+  const { platforms, loading } = useLive();
   const configured = platforms.length > 0;
-
-  /*
-   * 余额一行只放得下一个数。两个币种都有时，主值给人民币（国内厂商居多），
-   * 美元放副行 —— 绝不相加，相加得到的数字没有意义。
-   */
-  const balanceValue =
-    sum.cnyProviders > 0
-      ? `¥${fmtMoney(sum.cnyTotal)}`
-      : sum.usdProviders > 0
-        ? `$${fmtMoney(sum.usdTotal)}`
-        : '—';
-  const balanceSub =
-    sum.cnyProviders > 0 && sum.usdProviders > 0
-      ? `另 $${fmtMoney(sum.usdTotal)}`
-      : sum.balanceCount > 0
-        ? `${sum.balanceCount} 个厂商已接入`
-        : sum.balanceFailed > 0
-          ? '余额接口未返回金额'
-          : configured
-            ? '当前厂商不提供余额接口'
-            : '未配置 Key';
 
   return (
     <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
@@ -653,49 +458,6 @@ function Overview() {
           <ArrowUpRight size="0.95em" className="mt-[0.15em] shrink-0 text-[var(--brand-green-text)]" />
         </a>
       )}
-
-      {/*
-       * 三张卡全部来自真实接口：
-       *   余额   ← 厂商 balance 接口（没有就显示「—」并说明）
-       *   厂商数 ← /models 的响应状态
-       *   模型数 ← /models 返回的条目数
-       * 没有一项是估算或占位。
-       */}
-      <StatGrid>
-        {loading ? (
-          <>
-            <StatSkeleton icon={<CircleDollarSign size="1em" />} label="账户余额" />
-            <StatSkeleton icon={<Wallet size="1em" />} label="已接入厂商" />
-            <StatSkeleton icon={<Coins size="1em" />} label="可用模型" />
-          </>
-        ) : (
-          <>
-            <StatCard
-              icon={<CircleDollarSign size="1em" />}
-              label="账户余额"
-              value={balanceValue}
-              sub={balanceSub}
-              accent="#07C160"
-            />
-            <StatCard
-              icon={<Wallet size="1em" />}
-              label="已接入厂商"
-              value={configured ? `${sum.okCount}/${platforms.length}` : '0'}
-              sub={
-                sum.badCount > 0 ? `${sum.badCount} 个连接异常` : configured ? '全部连接正常' : '尚未配置'
-              }
-              accent="#FA9D3B"
-            />
-            <StatCard
-              icon={<Coins size="1em" />}
-              label="可用模型"
-              value={configured ? String(sum.modelTotal) : '0'}
-              sub={configured ? `${platforms.length} 个厂商合计` : '尚未配置'}
-              accent="#D97757"
-            />
-          </>
-        )}
-      </StatGrid>
 
       {/* 厂商连接状态：每一行都是刚请求回来的真实结果 */}
       <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
@@ -749,30 +511,125 @@ function Overview() {
       </LiquidGlass>
 
       {/*
-       * 用量历史：明确写出「未接入」而不是画一条假的曲线。
-       * 这一段存在的意义是告诉用户为什么看不到消耗趋势，
-       * 以及需要什么才能看到 —— 而不是用动画掩盖数据缺失。
+       * 厂商用量：左名右进度条。
+       *
+       * 进度条只在厂商真给了用量数据时才画。实测 GLM / MiMo 的 /usage 系列全是 404
+       * （与随手编的路径返回一致），所以这两家只能显示「无用量接口」——
+       * 画一根归零的条子等于编造一个"用量很小"的结论。
        */}
-      <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-        <div className="p-[var(--pad-card)]">
-          <h2 className="mb-[0.15em] text-[0.98em] font-medium text-[var(--text-primary)]">用量历史</h2>
-          <p className="mb-[var(--sp-3)] text-[0.78em] text-[var(--text-faint)]">逐日消耗 · 尚未接入</p>
-          <EmptyBlock
-            title="没有用量数据源"
-            desc="当前只接入了「模型清单」与「余额」两类接口。逐日 token 消耗、调用次数、延迟需要厂商提供用量或账单接口，或由本地代理记账。接入前这里保持为空，不显示估算值。"
-            height="9em"
-          />
-        </div>
-      </LiquidGlass>
+      <UsageRanking />
     </div>
+  );
+}
+
+/* ============================================================ 厂商用量 */
+
+/**
+ * 厂商用量排行。
+ *
+ * 横向进度条的分母取「所有拿到数据的厂商里的最大值」，不是某个假定的总额：
+ * 厂商之间的 token 口径未必一致（输入/输出/缓存是否合并、是否含免费额度），
+ * 把绝对量直接当"占全站百分比"是错的，所以只做相对长度比较。
+ */
+function UsageRanking() {
+  const { platforms, loading } = useLive();
+
+  const rows = useMemo(() => {
+    const withUsage = platforms.map((p) => ({
+      p,
+      v: p.usage,
+      // 统一排序：有数据的按量降序在前，无数据的按名字在后
+      sortKey: p.usage ? -p.usage.value : Number.POSITIVE_INFINITY,
+    }));
+    withUsage.sort((a, b) => {
+      if (a.sortKey !== b.sortKey) return a.sortKey - b.sortKey;
+      return a.p.name.localeCompare(b.p.name);
+    });
+    return withUsage;
+  }, [platforms]);
+
+  const max = rows.reduce((m, r) => (r.v ? Math.max(m, r.v.value) : m), 0);
+  const anyData = rows.some((r) => r.v);
+
+  return (
+    <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
+      <div className="p-[var(--pad-card)]">
+        <div className="mb-[var(--sp-3)] flex items-baseline justify-between gap-[var(--sp-2)]">
+          <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">厂商 Token 用量</h2>
+          <span className="shrink-0 text-[0.72em] text-[var(--text-faint)]">
+            {loading ? '读取中…' : anyData ? '厂商接口返回' : '暂无来源'}
+          </span>
+        </div>
+
+        {rows.length === 0 ? (
+          <EmptyBlock
+            title="没有已连接的厂商"
+            desc="配置 API Key 后这里会按厂商列出用量。"
+            height="8em"
+          />
+        ) : (
+          <div className="space-y-[var(--sp-3)]">
+            {rows.map(({ p, v }) => {
+              const pct = v && max > 0 ? Math.max(2, (v.value / max) * 100) : 0;
+              return (
+                <div key={p.id}>
+                  <div className="mb-[0.3em] flex items-baseline justify-between gap-[var(--sp-2)]">
+                    <div className="flex min-w-0 items-center gap-[var(--sp-1)]">
+                      <span
+                        className="h-[0.5em] w-[0.5em] shrink-0 rounded-full"
+                        style={{ background: p.color }}
+                      />
+                      <span className="truncate text-[0.86em] font-medium text-[var(--text-primary)]">
+                        {p.name}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-[0.78em] tabular-nums text-[var(--text-secondary)]">
+                      {v
+                        ? v.unit === 'tokens'
+                          ? fmtTokens(v.value)
+                          : `${v.currency === 'CNY' ? '¥' : '$'}${fmtMoney(v.value)}`
+                        : '—'}
+                    </span>
+                  </div>
+                  {/* 轨道：无数据时只画底槽，不画填充 */}
+                  <div className="h-[0.42em] w-full overflow-hidden rounded-full bg-[var(--bg-track)]">
+                    {v && (
+                      <div
+                        className="h-full rounded-full transition-[width] duration-500"
+                        style={{ width: `${pct}%`, background: p.color }}
+                      />
+                    )}
+                  </div>
+                  {!v && (
+                    <div className="mt-[0.25em] text-[0.7em] text-[var(--text-faint)]">
+                      {p.usageSupported ? '用量接口未返回数据' : '该厂商未提供用量接口'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+      </div>
+    </LiquidGlass>
   );
 }
 
 /* ============================================================ 平台页 */
 
 function PlatformsPage() {
-  const { platforms, loading } = useLive();
+  const { platforms, models, loading } = useLive();
   const configured = platforms.length > 0;
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  /* 模型按厂商分组：一次遍历，避免每张卡片各 filter 一遍 */
+  const modelsByPlatform = useMemo(() => {
+    const map: Record<string, LiveModel[]> = {};
+    for (const m of models) (map[m.platformId] ??= []).push(m);
+    for (const k of Object.keys(map)) map[k].sort((a, b) => a.name.localeCompare(b.name));
+    return map;
+  }, [models]);
 
   if (!configured && !loading) {
     return (
@@ -799,113 +656,17 @@ function PlatformsPage() {
 
   return (
     <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
-      <div className="grid gap-[var(--gap-grid)] sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid items-start gap-[var(--gap-grid)] sm:grid-cols-2 xl:grid-cols-3">
         {platforms.map((p) => (
-          <PlatformCard key={p.id} p={p} />
+          <PlatformCard
+            key={p.id}
+            p={p}
+            models={modelsByPlatform[p.id] ?? []}
+            open={openId === p.id}
+            onToggle={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
+          />
         ))}
       </div>
-    </div>
-  );
-}
-
-/* ============================================================ 模型页 */
-
-function ModelsPage() {
-  const { platforms, models, loading } = useLive();
-  const [sort, setSort] = useState<SortKey>('name');
-  const [filter, setFilter] = useState<string>('all');
-  const configured = platforms.length > 0;
-
-  const items = useMemo(() => {
-    const base = filter === 'all' ? models : models.filter((m) => m.platformId === filter);
-    const sorted = [...base];
-    sorted.sort((a, b) => {
-      if (sort === 'provider') return a.platformName.localeCompare(b.platformName);
-      if (sort === 'price') {
-        // 按输入价排序；未收录的排最后
-        const av = a.pricing.input ?? Number.POSITIVE_INFINITY;
-        const bv = b.pricing.input ?? Number.POSITIVE_INFINITY;
-        return av - bv;
-      }
-      return a.name.localeCompare(b.name);
-    });
-    return sorted;
-  }, [models, filter, sort]);
-
-  if (!configured && !loading) {
-    return (
-      <div className="lb-enter flex h-full min-h-[calc(100vh-9em)] items-center justify-center p-[var(--pad-page)]">
-        <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)" className="w-full">
-          <EmptyBlock
-            title="还没有模型数据"
-            desc="配置 Key 后，这里会显示厂商 /models 接口真实返回的可用模型清单。"
-            height="16em"
-            action={
-              <a
-                href="#providers"
-                className="mt-[var(--sp-1)] inline-flex items-center gap-[var(--sp-1)] rounded-[var(--radius-btn)] bg-[var(--brand-green)] px-[var(--sp-3)] py-[var(--sp-2)] text-[0.86em] font-medium text-white"
-              >
-                <KeyRound size="0.95em" />
-                去配置 Key
-              </a>
-            }
-          />
-        </LiquidGlass>
-      </div>
-    );
-  }
-
-  return (
-    <div className="lb-enter space-y-[var(--gap-grid)] p-[var(--pad-page)]">
-      <LiquidGlass radius={10} bezel={22} strength={12} blur={10} tint="rgba(255,255,255,0.4)" tintDark="rgba(26,30,38,0.44)">
-        <div className="p-[var(--pad-card)]">
-          <div className="mb-[var(--sp-3)] flex flex-wrap items-center gap-[var(--sp-2)]">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-[0.98em] font-medium text-[var(--text-primary)]">可用模型</h2>
-              <p className="text-[0.78em] text-[var(--text-faint)]">
-                {loading ? '正在读取…' : `共 ${items.length} 个 · 来自厂商 /models 接口`}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-[var(--sp-1)]">
-              <button
-                onClick={() => setFilter('all')}
-                className={cx(
-                  'rounded-[var(--radius-btn)] px-[var(--sp-2)] py-[var(--sp-1)] text-[0.8em] transition-colors duration-150',
-                  filter === 'all'
-                    ? 'bg-[var(--brand-green-10)] font-medium text-[var(--brand-green-text)]'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]',
-                )}
-              >
-                全部
-              </button>
-              {platforms.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setFilter(p.id)}
-                  className={cx(
-                    'flex items-center gap-[var(--sp-1)] rounded-[var(--radius-btn)] px-[var(--sp-2)] py-[var(--sp-1)] text-[0.8em] transition-colors duration-150',
-                    filter === p.id
-                      ? 'bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]'
-                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]',
-                  )}
-                >
-                  <span className="h-[0.45em] w-[0.45em] rounded-full" style={{ background: p.color }} />
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          {items.length === 0 ? (
-            <EmptyBlock
-              title="没有拉到模型"
-              desc="厂商返回的模型列表为空，或所有厂商连接均失败。可到「模型厂商」页重新测试连接。"
-              height="12em"
-            />
-          ) : (
-            <ModelTable items={items} sort={sort} onSort={setSort} />
-          )}
-        </div>
-      </LiquidGlass>
     </div>
   );
 }
@@ -985,11 +746,21 @@ function TrendPage() {
 function Shell() {
   const readHash = () => {
     const h = window.location.hash.replace('#', '');
-    return ['overview', 'platforms', 'models', 'trend', 'providers', 'appearance'].includes(h)
+    /* 'models' 已并入平台页：旧书签不能直接落到空白，重定向到 platforms */
+    if (h === 'models') return 'platforms';
+    return ['overview', 'platforms', 'trend', 'providers', 'appearance'].includes(h)
       ? h
       : 'overview';
   };
   const [active, setActive] = useState(readHash);
+  const scrollRef = useRef<HTMLElement | null>(null);
+  const { refresh } = useRefresh();
+  /*
+   * 第三个返回值是「本次由下拉触发」的落定窗口，和全局 refreshing 分开：
+   * 定时自动刷新也会把 refreshing 置 true，若直接传给它，
+   * 自动刷新就会在顶部凭空显示一条下拉指示器，看起来像自己拉了一下。
+   */
+  const { pull, armed, settling } = usePullToRefresh(scrollRef, refresh);
 
   // 地址栏 hash ↔ 页面同步（手机可直接跳 #models 等）
   useEffect(() => {
@@ -1022,11 +793,11 @@ function Shell() {
         {/* lb-scroll: 让滚动条不占布局宽度（见 styles.css）。
             否则 main 的内容盒会比视口窄 8–10px，
             而 fixed 的 dock 按视口算 —— 两者右边缘必然错开一个滚动条宽度。 */}
-        <main className="lb-scroll flex-1 overflow-y-auto pb-[var(--dock-h)] md:pb-0">
+        <main ref={scrollRef} className="lb-scroll flex-1 overflow-y-auto pb-[var(--dock-h)] md:pb-0">
+          <PullIndicator pull={pull} armed={armed} refreshing={settling} />
           <TopBar />
           {active === 'overview' && <Overview />}
           {active === 'platforms' && <PlatformsPage />}
-          {active === 'models' && <ModelsPage />}
           {active === 'trend' && <TrendPage />}
           {active === 'providers' && <ProvidersPage />}
           {active === 'appearance' && <SystemSettingsPage />}
